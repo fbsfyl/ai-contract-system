@@ -25,3 +25,7 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
 # ===== RAG 检索参数 =====
 TOP_K = int(os.getenv("TOP_K", "3"))
+
+# ===== 登录鉴权（考核 B4）=====
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")

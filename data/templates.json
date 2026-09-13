@@ -1,0 +1,97 @@
+[
+  {
+    "type": "采购",
+    "title": "{party_a}与{party_b}{contract_name}",
+    "body": "{contract_name}\n合同编号：{contract_no}\n甲方（采购方）：{party_a}\n乙方（供应方）：{party_b}\n合同金额：人民币 {amount} 元（大写：{amount_capital}）\n签订日期：{sign_date}\n履行期限：自{term_start}至{term_end}\n付款方式：{payment_method}\n违约责任：{breach_liability}\n争议解决：{dispute_resolution}\n合同类型：采购",
+    "clauses": {
+      "breach_liability": [
+        "乙方逾期交货的，每逾期一日按合同金额的0.5%向甲方支付违约金",
+        "乙方交付的货物不符合约定的，甲方有权要求退换货，由此产生的费用由乙方承担"
+      ],
+      "dispute_resolution": [
+        "双方协商不成的，向甲方所在地人民法院提起诉讼",
+        "提交合同签订地仲裁委员会仲裁"
+      ],
+      "payment_method": [
+        "合同签订后预付50%，货到验收合格后支付50%",
+        "货到验收合格后一次性付清"
+      ]
+    }
+  },
+  {
+    "type": "销售",
+    "title": "{party_a}与{party_b}{contract_name}",
+    "body": "{contract_name}\n合同编号：{contract_no}\n甲方（销售方）：{party_a}\n乙方（购买方）：{party_b}\n合同金额：人民币 {amount} 元（大写：{amount_capital}）\n签订日期：{sign_date}\n履行期限：自{term_start}至{term_end}\n付款方式：{payment_method}\n违约责任：{breach_liability}\n争议解决：{dispute_resolution}\n合同类型：销售",
+    "clauses": {
+      "breach_liability": [
+        "甲方逾期交货的，按合同金额的日0.3%向乙方支付违约金",
+        "甲方交付的软件不符合验收标准的，应无偿修复直至达到验收标准"
+      ],
+      "dispute_resolution": [
+        "提交乙方所在地仲裁委员会仲裁",
+        "双方协商不成的，向合同签订地人民法院提起诉讼"
+      ],
+      "payment_method": [
+        "签订后支付40%预付款，验收合格后支付60%",
+        "交付验收合格后一次性付清"
+      ]
+    }
+  },
+  {
+    "type": "服务",
+    "title": "{party_a}与{party_b}{contract_name}",
+    "body": "{contract_name}\n合同编号：{contract_no}\n甲方（委托方）：{party_a}\n乙方（服务方）：{party_b}\n合同金额：人民币 {amount} 元（大写：{amount_capital}）\n签订日期：{sign_date}\n履行期限：自{term_start}至{term_end}\n付款方式：{payment_method}\n违约责任：{breach_liability}\n争议解决：{dispute_resolution}\n合同类型：服务",
+    "clauses": {
+      "breach_liability": [
+        "乙方服务未达约定标准的，甲方有权扣减相应服务费",
+        "乙方未经甲方同意擅自转委托的，甲方有权解除合同并追偿损失"
+      ],
+      "dispute_resolution": [
+        "双方协商不成的，向甲方所在地人民法院提起诉讼",
+        "提交服务履行地仲裁委员会仲裁"
+      ],
+      "payment_method": [
+        "按季度支付服务费，每季度末支付当季费用",
+        "服务完成后一次性付清"
+      ]
+    }
+  },
+  {
+    "type": "租赁",
+    "title": "{party_a}与{party_b}{contract_name}",
+    "body": "{contract_name}\n合同编号：{contract_no}\n甲方（出租方）：{party_a}\n乙方（承租方）：{party_b}\n合同金额：人民币 {amount} 元（大写：{amount_capital}）\n签订日期：{sign_date}\n履行期限：自{term_start}至{term_end}\n付款方式：{payment_method}\n违约责任：{breach_liability}\n争议解决：{dispute_resolution}\n合同类型：租赁",
+    "clauses": {
+      "breach_liability": [
+        "乙方逾期支付租金的，按欠付租金的日0.5%支付违约金",
+        "乙方擅自转租或改变用途的，甲方有权解除合同并收回租赁物"
+      ],
+      "dispute_resolution": [
+        "向租赁设备所在地人民法院提起诉讼",
+        "提交合同签订地仲裁委员会仲裁"
+      ],
+      "payment_method": [
+        "按月支付，每月末支付当月租金",
+        "按季度支付，每季度初支付当季租金"
+      ]
+    }
+  },
+  {
+    "type": "其他",
+    "title": "{party_a}与{party_b}{contract_name}",
+    "body": "{contract_name}\n合同编号：{contract_no}\n甲方：{party_a}\n乙方：{party_b}\n合同金额：人民币 {amount} 元（大写：{amount_capital}）\n签订日期：{sign_date}\n履行期限：自{term_start}至{term_end}\n付款方式：{payment_method}\n违约责任：{breach_liability}\n争议解决：{dispute_resolution}\n合同类型：其他",
+    "clauses": {
+      "breach_liability": [
+        "任何一方违反协议约定的，应赔偿对方因此遭受的实际损失",
+        "任何一方单方解除协议的，应承担由此产生的违约责任"
+      ],
+      "dispute_resolution": [
+        "提交协议签订地仲裁委员会仲裁",
+        "双方协商不成的，向甲方所在地人民法院提起诉讼"
+      ],
+      "payment_method": [
+        "按项目实际进度分期拨付资金",
+        "按约定节点分期支付"
+      ]
+    }
+  }
+]

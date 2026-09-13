@@ -12,14 +12,15 @@
 """
 import os
 import sys
+import tempfile
 import unittest
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, "scripts"))
 
-from app import classifier, extractor, finance, vector_store  # noqa: E402
-from app.schemas import ContractFields  # noqa: E402
+from app import cms, classifier, config, extractor, finance, store, vector_store  # noqa: E402
+from app.schemas import ContractFields, ExtractedContract  # noqa: E402
 from evaluate import FIELDS, compare, field_equal  # noqa: E402
 
 VALID_FIELDS = {
@@ -134,6 +135,62 @@ class TestFieldCompare(unittest.TestCase):
     def test_compare_all(self):
         correct, total = compare(VALID_FIELDS, VALID_FIELDS)
         self.assertEqual((correct, total), (len(FIELDS), len(FIELDS)))
+
+
+class TestStore(unittest.TestCase):
+    def setUp(self):
+        self._orig_db = config.DB_PATH
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        tmp.close()
+        self._tmp_path = tmp.name
+        config.DB_PATH = self._tmp_path
+        store.init_db()
+
+    def tearDown(self):
+        config.DB_PATH = self._orig_db
+        if os.path.exists(self._tmp_path):
+            os.unlink(self._tmp_path)
+
+    def _insert(self, contract_type="采购", contract_no="HT-CG-2026-001"):
+        c = ContractFields(
+            contract_name="测试合同", contract_no=contract_no, contract_type=contract_type,
+            party_a="甲方", party_b="乙方", amount=100000, amount_capital="壹拾万元整",
+            sign_date="2026年1月1日", term_start="2026年1月1日", term_end="2026年12月31日",
+            payment_method="一次性付清", breach_liability="违约", dispute_resolution="协商",
+        )
+        return store.insert(ExtractedContract(**c.model_dump(), reference_examples=[]))
+
+    def test_default_status(self):
+        cid = self._insert()
+        self.assertEqual(store.get_contract(cid)["status"], "草拟")
+
+    def test_valid_transition(self):
+        cid = self._insert()
+        self.assertEqual(store.update_status(cid, "审批")["status"], "审批")
+
+    def test_invalid_transition(self):
+        cid = self._insert()
+        with self.assertRaises(ValueError):
+            store.update_status(cid, "归档")  # 草拟不能直接归档
+
+    def test_next_no(self):
+        from datetime import datetime
+
+        year = datetime.now().year
+        self.assertEqual(store.next_contract_no("采购"), f"HT-CG-{year}-001")
+
+    def test_dashboard_empty(self):
+        self.assertEqual(store.dashboard()["total"]["count"], 0)
+
+
+class TestCms(unittest.TestCase):
+    def test_amount_capital(self):
+        self.assertEqual(cms.amount_to_capital(480000), "肆拾捌万元整")
+        self.assertEqual(cms.amount_to_capital(0), "零元整")
+
+    def test_templates_five_types(self):
+        types = {t["type"] for t in cms.list_templates()}
+        self.assertEqual(types, {"采购", "销售", "服务", "租赁", "其他"})
 
 
 if __name__ == "__main__":

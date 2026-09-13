@@ -76,15 +76,17 @@ contract project/
 │   ├── table.py         # 复杂表格/图像预处理管线（PP-Structure 最小集）
 │   ├── extractor.py     # 提取流水线（RAG few-shot + 校验重试）
 │   ├── classifier.py    # 合同分类（LLM + 规则双通道，输出置信度）
+│   ├── cms.py           # 合同信息管理（模板+条款库起草+金额大写+自动编号）
 │   ├── pipeline.py      # 线性流水线（LangChain LCEL：分类 → 提取）
 │   ├── agents.py        # 多智能体接力（LangGraph：分类→提取→校验→审查，自我修正）
 │   ├── finance.py       # 业财一体化（付款节点 → 收付款计划）
 │   ├── review_agent.py  # LangGraph 审查 Agent
-│   ├── store.py         # SQLite 入库/查询 + 收付款计划
+│   ├── store.py         # SQLite 入库/查询 + 收付款计划 + 状态机 + 台账看板
 │   └── static/index.html
 ├── data/
 │   ├── examples/contracts.json  # 5 条标准范例（RAG 检索库）
 │   ├── tests.json               # 5 条测试金标准（采购/销售/服务/租赁/其他）
+│   ├── templates.json           # 5 类合同模板 + 条款库（B3 起草）
 │   ├── sample_contract.pdf      # 政府采购示范文本（空白模板）
 │   ├── filled_contract.pdf      # 已填好的服务器采购合同
 │   ├── scanned_contract.pdf     # 扫描版（图片型 PDF，测 OCR）
@@ -167,12 +169,15 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 |---|---|---|---|
 | B1 变量提取 | 上传 PDF → 提取 13 字段 | 浏览器上传 `filled_contract.pdf` | 名称/甲乙双方/金额/大写/日期/付款方式/违约/争议解决全部正确 |
 | B2 分类 | 合同类型判定（LLM+规则双通道） | 提取结果中「合同类型」字段；或运行 `scripts\eval_classify.py` | 采购/销售/服务/租赁/其他 之一；10 份样本分类准确率 ≥90%（实测 100%） |
-| B3 信息管理 | 合同台账 | 「已入库合同台账」卡片 | 显示所有合同，含名称/类型/金额/日期 |
+| B3 信息管理 | 合同台账 + 状态流转 | 「已入库合同台账」卡片 | 显示所有合同（含状态列），支持 草拟→审批→用印→归档→作废 流转，非法流转被拦截 |
+| B3 信息管理 | 模板+条款库起草 | 「要素拼装起草」卡片 | 按 5 类模板选型，填要素后自动编号（`HT-类型-年份-序号`）+ 拼装正文 + 入库 |
+| B3 信息管理 | 台账看板 + 导出 | 「台账看板」卡片 | 按类型/状态/金额汇总，支持一键导出 CSV |
+| B4 商用加固 | 登录鉴权 | 页面顶部登录栏；或直接调 `POST /api/draft` 等 | 未登录访问写操作接口返回 401，登录后携带 Bearer token 才可起草/改状态 |
 | B5 业财一体化 | 收付款计划 | 台账点「业财」按钮 | 按合同类型判定应收/应付，生成分期计划 |
 | C 技术解耦 | LLM/Embedding 可替换 | 改 `.env` 的 `LLM_BASE_URL` / `EMBEDDING_PROVIDER` | 无需改业务代码即可切换底座 |
 | D2 RAG 当监督学习 | few-shot 提升准确率 | 运行 `scripts\evaluate.py` | 有 few-shot 准确率 > 无 few-shot |
 | D1 检索可视化 | 整份范例 + 条款切块检索 | 首页「检索可视化」卡片或 `GET /api/search?q=...` | 返回相似度排序的范例与条款块 |
-| D2 RAGAS 评估 | 4 指标 + 评估报告 | 运行 `scripts\ragas_eval.py` | 输出 faithfulness/answer_relevancy/context_precision/context_recall，并写 `data/ragas_report.txt` |
+| D4 改进闭环 | RAGAS 4 指标 + 前后对比 | 运行 `scripts\ragas_eval.py` | 输出 4 指标，并对比「整份范例」vs「条款切块」两轮聚合分，写 `data/ragas_report.txt` |
 | D3 LangChain 线性 | 分类→提取串行管道 | 上传 PDF 时 `app/pipeline.py` 自动走 LCEL | `RunnableLambda | RunnableLambda` 无状态一遍跑完 |
 | D3 LangGraph 审查 | 合同审查 + 回路 | 台账点「审查」按钮 | 返回结论 + 回路轨迹（pass/supplement/人工介入） |
 | E 场景分流 | 文字版直抽、扫描件 OCR | 分别上传 `filled_contract.pdf` 和 `scanned_contract.pdf` | 前者「文字版」，后者「扫描件(OCR识别)」且均能提取 |
@@ -207,16 +212,16 @@ LLM 通道：10/10 = 100.0%
 差距：+0.0%
 ```
 
-`scripts/ragas_eval.py` 输出（4 指标，均值写入 `data/ragas_report.txt`）：
+`scripts/ragas_eval.py` 输出（D4 改进闭环：两轮评估对比，均值写入 `data/ragas_report.txt`）：
 
 ```
-faithfulness: 0.1562
-answer_relevancy: 0.4029
-context_precision: 0.0000
-context_recall: 0.1923
+第一轮（context = 整份范例全文）：
+  faithfulness / answer_relevancy / context_precision / context_recall
+第二轮（context = 条款切块检索结果）：
+  同上 4 指标，并与第一轮逐项对比 ↑/↓ 变化量
 ```
 
-> RAGAS 分数偏低是设计口径所致：context 为整份范例全文、answer 为完整字段 JSON，逐字段准确率仍以 `evaluate.py` 为准；报告内已写清诊断与改进说明。
+> RAGAS 分数偏低是设计口径所致：answer 为完整字段 JSON、context 为参照范例，逐字段准确率仍以 `evaluate.py` 为准；报告内已写清诊断与改进建议。两轮对比用于验证「条款切块检索」对上下文精度的改进效果。
 
 ## 六、API 一览
 
@@ -230,6 +235,13 @@ context_recall: 0.1923
 | POST | `/api/review` | LangGraph 审查（body `{"contract_id": 1}`） |
 | POST | `/api/contracts/{id}/finance` | 生成收付款计划 |
 | GET | `/api/contracts/{id}/finance` | 查询收付款计划 |
+| POST | `/api/login` | 登录（body `{"username","password"}`，返回 Bearer token） |
+| GET | `/api/templates` | 合同模板 + 条款库列表 |
+| GET | `/api/contracts/next_no?contract_type=` | 按类型取下一可用合同编号 |
+| POST | `/api/draft` | 要素拼装起草（需登录，自动编号 + 拼正文 + 入库） |
+| POST | `/api/contracts/{id}/status` | 状态流转（需登录，body `{"status":"审批"}`，校验状态机） |
+| GET | `/api/dashboard` | 台账看板（按类型/状态/金额汇总） |
+| GET | `/api/export` | 导出合同台账 CSV（含 UTF-8 BOM） |
 
 `/api/extract` 返回的 `scene` 取值：`text`（文字版）、`scanned_ocr`（扫描件已 OCR）、`scanned_table`（扫描件含表格，已结构化）、`scanned`（OCR 也失败）。
 

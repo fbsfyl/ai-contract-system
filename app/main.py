@@ -1,15 +1,18 @@
 """FastAPI 入口：上传 PDF → 分流 → 提取 → 入库 → 回显（考核 B1 全链路）。"""
+import csv
+import io
 import logging
 import os
+import secrets
 import tempfile
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import agents, finance, ocr, pdf_loader, pipeline, review_agent, store, table, vector_store
+from app import agents, cms, config, finance, ocr, pdf_loader, pipeline, review_agent, store, table, vector_store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -41,9 +44,55 @@ class AgentsRequest(BaseModel):
     text: str
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class StatusRequest(BaseModel):
+    status: str
+
+
+class DraftRequest(BaseModel):
+    contract_type: str
+    contract_name: str
+    party_a: str
+    party_b: str
+    amount: float
+    sign_date: str
+    term_start: str
+    term_end: str
+    payment_method: str
+    breach_liability: str
+    dispute_resolution: str
+    amount_capital: str = ""
+
+
+# 登录鉴权（考核 B4）：内存 token，演示级
+_ACTIVE_TOKENS: set[str] = set()
+
+
+def _require_auth(authorization: str | None = Header(default=None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未登录")
+    token = authorization.removeprefix("Bearer ")
+    if token not in _ACTIVE_TOKENS:
+        raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
+    return token
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "examples_in_store": vector_store.count()}
+
+
+@app.post("/api/login")
+def login(req: LoginRequest):
+    if req.username == config.ADMIN_USER and req.password == config.ADMIN_PASSWORD:
+        token = secrets.token_hex(16)
+        _ACTIVE_TOKENS.add(token)
+        return {"token": token}
+    raise HTTPException(status_code=401, detail="账号或密码错误")
 
 
 @app.post("/api/extract", response_model=ExtractResponse)
@@ -164,6 +213,64 @@ def generate_finance(contract_id: int):
 @app.get("/api/contracts/{contract_id}/finance")
 def get_finance(contract_id: int):
     return {"contract_id": contract_id, "plans": store.list_plans(contract_id)}
+
+
+@app.get("/api/templates")
+def templates():
+    """模板 + 条款库（考核 B3：要素拼装起草）。"""
+    return cms.list_templates()
+
+
+@app.get("/api/contracts/next_no")
+def next_no(contract_type: str = "其他"):
+    return {"contract_no": store.next_contract_no(contract_type)}
+
+
+@app.post("/api/draft", dependencies=[Depends(_require_auth)])
+def draft_contract(req: DraftRequest):
+    """要素拼装起草（考核 B3）：模板拼装 + 自动编号 + 入库。"""
+    try:
+        return cms.draft(**req.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/contracts/{contract_id}/status", dependencies=[Depends(_require_auth)])
+def change_status(contract_id: int, req: StatusRequest):
+    """合同状态流转（考核 B3）：草拟→审批→用印→归档→作废。"""
+    try:
+        updated = store.update_status(contract_id, req.status)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if updated is None:
+        raise HTTPException(status_code=404, detail="合同不存在")
+    return updated
+
+
+@app.get("/api/dashboard")
+def dashboard():
+    """台账看板（考核 B3）：类型/状态/金额统计。"""
+    return store.dashboard()
+
+
+@app.get("/api/export")
+def export_csv():
+    """台账导出 CSV（考核 B3）。"""
+    rows = store.list_contracts()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["ID", "合同名称", "合同编号", "类型", "甲方", "乙方", "金额(元)", "签订日期", "状态"])
+    for r in rows:
+        writer.writerow([
+            r.get("id"), r.get("contract_name"), r.get("contract_no"), r.get("contract_type"),
+            r.get("party_a"), r.get("party_b"), r.get("amount"), r.get("sign_date"), r.get("status"),
+        ])
+    content = "\ufeff" + buf.getvalue()  # BOM 便于 Excel 识别 UTF-8
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=contracts.csv"},
+    )
 
 
 # 静态页（放最后注册，避免覆盖 /api 路由）

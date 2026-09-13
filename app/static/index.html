@@ -29,6 +29,13 @@
   <header>
     <h1>AI 合同系统（最小集）</h1>
     <p>上传 PDF → 文字分流 → RAG few-shot 检索 → LLM 结构化提取 → 入库回显</p>
+    <div id="loginBar" style="margin-top:10px;">
+      <input type="text" id="loginUser" placeholder="账号" value="admin" style="padding:6px;border-radius:4px;border:0;" />
+      <input type="password" id="loginPass" placeholder="密码" value="admin123" style="padding:6px;border-radius:4px;border:0;" />
+      <button onclick="login()">登录</button>
+      <button onclick="logout()" style="background:#5a6b7c;">登出</button>
+      <span class="hint" id="loginStatus" style="color:#b8c4d0;">未登录</span>
+    </div>
   </header>
   <main>
     <div class="card">
@@ -82,6 +89,57 @@
     </div>
 
     <div class="card">
+      <h2>台账看板（B3）</h2>
+      <div class="upload-row">
+        <button onclick="loadDashboard()">刷新看板</button>
+        <button onclick="exportCsv()">导出 CSV</button>
+      </div>
+      <div id="dashboard" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>要素拼装起草（B3）</h2>
+      <p class="hint">选模板 → 填要素 → 自动编号 + 拼装正文 + 入库。</p>
+      <div class="upload-row" style="margin-bottom:8px;">
+        <label>类型：</label>
+        <select id="draftType" onchange="loadTemplate()" style="padding:6px;">
+          <option value="采购">采购</option>
+          <option value="销售">销售</option>
+          <option value="服务">服务</option>
+          <option value="租赁">租赁</option>
+          <option value="其他">其他</option>
+        </select>
+        <label>名称：</label>
+        <input id="draftName" placeholder="如：服务器设备采购合同" style="flex:1;padding:6px;" />
+      </div>
+      <div class="upload-row" style="margin-bottom:8px;">
+        <label>甲方：</label><input id="draftPartyA" placeholder="甲方全称" style="flex:1;padding:6px;" />
+        <label>乙方：</label><input id="draftPartyB" placeholder="乙方全称" style="flex:1;padding:6px;" />
+      </div>
+      <div class="upload-row" style="margin-bottom:8px;">
+        <label>金额：</label><input id="draftAmount" type="number" placeholder="0" style="width:140px;padding:6px;" />
+        <label>签订日期：</label><input id="draftSign" placeholder="2025年1月1日" style="padding:6px;" />
+        <label>起：</label><input id="draftTermStart" placeholder="2025年1月1日" style="padding:6px;" />
+        <label>止：</label><input id="draftTermEnd" placeholder="2025年12月31日" style="padding:6px;" />
+      </div>
+      <div class="upload-row" style="margin-bottom:8px;">
+        <label>付款方式：</label><input id="draftPayment" placeholder="如：合同签订后预付50%，验收合格后支付50%" style="flex:1;padding:6px;" />
+      </div>
+      <div class="upload-row" style="margin-bottom:8px;">
+        <label>违约责任：</label><input id="draftBreach" placeholder="违约责任条款" style="flex:1;padding:6px;" />
+      </div>
+      <div class="upload-row" style="margin-bottom:8px;">
+        <label>争议解决：</label><input id="draftDispute" placeholder="争议解决条款" style="flex:1;padding:6px;" />
+      </div>
+      <div class="upload-row">
+        <button id="draftBtn" onclick="draft()">起草并入库</button>
+        <span class="hint" id="draftStatus">就绪。</span>
+      </div>
+      <div id="draftClauses" style="margin-top:10px;"></div>
+      <div id="draftResult" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
       <h2>已入库合同台账</h2>
       <button onclick="loadContracts()">刷新</button>
       <div id="contracts" style="margin-top:12px;"></div>
@@ -96,6 +154,177 @@
       ["term_end","履行结束"],["payment_method","付款方式"],["breach_liability","违约责任"],
       ["dispute_resolution","争议解决"]
     ];
+
+    // ===== B3 合同信息管理 + B4 登录鉴权 =====
+    const STATUS_FLOW = {
+      "草拟": ["审批", "作废"],
+      "审批": ["用印", "作废"],
+      "用印": ["归档", "作废"],
+      "归档": ["作废"],
+      "作废": []
+    };
+
+    let AUTH_TOKEN = localStorage.getItem("contract_token") || "";
+    let TEMPLATES = [];
+
+    function authHeaders() {
+      return AUTH_TOKEN ? { "Authorization": "Bearer " + AUTH_TOKEN } : {};
+    }
+
+    async function login() {
+      const username = document.getElementById("loginUser").value.trim();
+      const password = document.getElementById("loginPass").value;
+      const st = document.getElementById("loginStatus");
+      try {
+        const resp = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
+        const r = await resp.json();
+        if (resp.ok && r.token) {
+          AUTH_TOKEN = r.token;
+          localStorage.setItem("contract_token", r.token);
+          st.textContent = "已登录";
+          st.style.color = "#9fdc9f";
+        } else {
+          st.textContent = r.detail || "登录失败";
+          st.style.color = "#ffb4b4";
+        }
+      } catch (e) {
+        st.textContent = "登录出错：" + e.message;
+        st.style.color = "#ffb4b4";
+      }
+    }
+
+    function logout() {
+      AUTH_TOKEN = "";
+      localStorage.removeItem("contract_token");
+      const st = document.getElementById("loginStatus");
+      st.textContent = "未登录";
+      st.style.color = "#b8c4d0";
+    }
+
+    function statusButtons(id, status) {
+      const targets = STATUS_FLOW[status] || [];
+      if (!targets.length) return "";
+      return targets.map(s =>
+        `<button onclick="changeStatus(${id}, '${s}')" style="margin-left:4px;padding:3px 8px;font-size:12px;background:#8aa0b8;">${s}</button>`
+      ).join("");
+    }
+
+    async function changeStatus(id, status) {
+      try {
+        const resp = await fetch("/api/contracts/" + id + "/status", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+          body: JSON.stringify({ status })
+        });
+        const r = await resp.json();
+        if (!resp.ok) { alert(r.detail || "流转失败"); return; }
+        loadContracts();
+        loadDashboard();
+      } catch (e) { alert("流转出错：" + e.message); }
+    }
+
+    async function loadTemplates() {
+      try {
+        const resp = await fetch("/api/templates");
+        TEMPLATES = await resp.json();
+      } catch (e) { /* 模板加载失败不阻塞页面 */ }
+    }
+
+    function loadTemplate() {
+      const type = document.getElementById("draftType").value;
+      const tpl = TEMPLATES.find(t => t.type === type);
+      const div = document.getElementById("draftClauses");
+      if (!tpl) { div.innerHTML = ""; return; }
+      const groups = [
+        ["breach_liability", "违约", "draftBreach"],
+        ["dispute_resolution", "争议", "draftDispute"],
+        ["payment_method", "付款", "draftPayment"]
+      ];
+      let html = '<p class="hint">条款库（点击填充）：</p>';
+      for (const [key, label] of groups) {
+        html += '<div style="margin-bottom:4px;"><b>' + label + '：</b>';
+        (tpl.clauses[key] || []).forEach((c, idx) => {
+          html += `<button type="button" style="margin:2px;padding:3px 8px;font-size:12px;background:#8aa0b8;" onclick="fillClause('${key}', ${idx})">${escapeHtml(c.slice(0, 18))}…</button>`;
+        });
+        html += '</div>';
+      }
+      div.innerHTML = html;
+    }
+
+    function fillClause(key, idx) {
+      const type = document.getElementById("draftType").value;
+      const tpl = TEMPLATES.find(t => t.type === type);
+      if (!tpl) return;
+      const inputId = { breach_liability: "draftBreach", dispute_resolution: "draftDispute", payment_method: "draftPayment" }[key];
+      document.getElementById(inputId).value = tpl.clauses[key][idx];
+    }
+
+    async function draft() {
+      const payload = {
+        contract_type: document.getElementById("draftType").value,
+        contract_name: document.getElementById("draftName").value.trim(),
+        party_a: document.getElementById("draftPartyA").value.trim(),
+        party_b: document.getElementById("draftPartyB").value.trim(),
+        amount: parseFloat(document.getElementById("draftAmount").value) || 0,
+        sign_date: document.getElementById("draftSign").value.trim(),
+        term_start: document.getElementById("draftTermStart").value.trim(),
+        term_end: document.getElementById("draftTermEnd").value.trim(),
+        payment_method: document.getElementById("draftPayment").value.trim(),
+        breach_liability: document.getElementById("draftBreach").value.trim(),
+        dispute_resolution: document.getElementById("draftDispute").value.trim()
+      };
+      const st = document.getElementById("draftStatus");
+      if (!payload.contract_name || !payload.party_a || !payload.party_b) {
+        st.textContent = "请填写名称、甲方、乙方";
+        return;
+      }
+      const btn = document.getElementById("draftBtn");
+      btn.disabled = true;
+      st.textContent = "起草中…";
+      try {
+        const resp = await fetch("/api/draft", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+          body: JSON.stringify(payload)
+        });
+        const r = await resp.json();
+        if (!resp.ok) { st.textContent = r.detail || "起草失败（需先登录）"; return; }
+        document.getElementById("draftResult").innerHTML =
+          '<h3>起草结果：' + escapeHtml(r.contract_no) + '</h3>' +
+          '<pre style="white-space:pre-wrap;background:#f7f8fa;padding:10px;border-radius:6px;font-size:12px;">' + escapeHtml(r.draft_text) + '</pre>';
+        st.textContent = "已入库（ID=" + r.contract.id + "）";
+        loadContracts();
+        loadDashboard();
+      } catch (e) {
+        st.textContent = "起草出错：" + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function loadDashboard() {
+      const div = document.getElementById("dashboard");
+      try {
+        const resp = await fetch("/api/dashboard");
+        const d = await resp.json();
+        let html = '<table><tr><th>维度</th><th>统计</th></tr>';
+        html += '<tr><th>总计</th><td>' + d.total.count + ' 份，金额合计 ' + d.total.amount + ' 元</td></tr>';
+        html += '<tr><th>按类型</th><td>' + (d.by_type.length ? d.by_type.map(t => escapeHtml(t.name) + ' ' + t.count + ' 份(' + t.amount + '元)').join('；') : '无') + '</td></tr>';
+        html += '<tr><th>按状态</th><td>' + (d.by_status.length ? d.by_status.map(s => escapeHtml(s.name) + ' ' + s.count + ' 份').join('；') : '无') + '</td></tr>';
+        html += '</table>';
+        div.innerHTML = html;
+      } catch (e) {
+        div.innerHTML = '<p class="error">看板加载失败：' + e.message + '</p>';
+      }
+    }
+
+    function exportCsv() {
+      window.location.href = "/api/export";
+    }
 
     async function extract() {
       const file = document.getElementById("file").files[0];
@@ -154,11 +383,13 @@
         const rows = await resp.json();
         const div = document.getElementById("contracts");
         if (!rows.length) { div.innerHTML = '<p class="muted">暂无入库合同。</p>'; return; }
-        let html = '<table><tr><th>#</th><th>名称</th><th>类型</th><th>甲方</th><th>乙方</th><th>金额(元)</th><th>签订日期</th><th>操作</th></tr>';
+        let html = '<table><tr><th>#</th><th>名称</th><th>类型</th><th>甲方</th><th>乙方</th><th>金额(元)</th><th>状态</th><th>操作</th></tr>';
         for (const r of rows) {
+          const status = r.status || "草拟";
           html += `<tr><td>${r.id}</td><td>${escapeHtml(r.contract_name)}</td><td>${escapeHtml(r.contract_type)}</td>` +
-                  `<td>${escapeHtml(r.party_a)}</td><td>${escapeHtml(r.party_b)}</td><td>${r.amount}</td><td>${escapeHtml(r.sign_date)}</td>` +
-                  `<td><button onclick="reviewContract(${r.id})">审查</button> <button onclick="generateFinance(${r.id})">业财</button></td></tr>`;
+                  `<td>${escapeHtml(r.party_a)}</td><td>${escapeHtml(r.party_b)}</td><td>${r.amount}</td>` +
+                  `<td>${escapeHtml(status)}</td>` +
+                  `<td><button onclick="reviewContract(${r.id})">审查</button> <button onclick="generateFinance(${r.id})">业财</button>${statusButtons(r.id, status)}</td></tr>`;
         }
         html += "</table>";
         div.innerHTML = html;
@@ -302,6 +533,8 @@
     function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
     loadContracts();
+    loadDashboard();
+    loadTemplates().then(() => loadTemplate());
   </script>
 </body>
 </html>

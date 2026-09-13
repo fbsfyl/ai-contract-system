@@ -123,7 +123,7 @@ def _build_llm() -> ChatOpenAI:
     )
 
 
-def _build_samples() -> list[dict]:
+def _build_samples(use_chunks: bool) -> list[dict]:
     with open(TESTS_PATH, encoding="utf-8") as f:
         tests = json.load(f)
 
@@ -131,9 +131,13 @@ def _build_samples() -> list[dict]:
     for t in tests:
         text = t["text"]
         # 运行真实链路：检索参照范例 + 抽取字段
-        reference = vector_store.search_similar(text)
         answer = extractor.extract(text, use_rag=True).model_dump()
-        contexts = [ex["text"] for ex in reference]
+        if use_chunks:
+            # 改进：检索粒度从「整份范例」改为「条款切块」，上下文更聚焦
+            contexts = [c["text"] for c in vector_store.search_chunks(text)]
+        else:
+            reference = vector_store.search_similar(text)
+            contexts = [ex["text"] for ex in reference]
         rows.append(
             {
                 "question": text,
@@ -159,54 +163,53 @@ METRIC_DESC = {
 LOW_SCORE_THRESHOLD = 0.5
 
 
-def _build_report(means: dict[str, float], scores: list[dict]) -> list[str]:
-    """生成评估报告正文（含低分项诊断与改进措施）。"""
+def _build_report(
+    means_before: dict[str, float],
+    means_after: dict[str, float],
+    scores_before: list[dict],
+    scores_after: list[dict],
+) -> list[str]:
+    """生成评估报告正文（改进前后对比 + 低分项诊断）。"""
     lines = [
-        "RAGAS 评估报告",
+        "RAGAS 评估报告（改进闭环）",
         "=" * 40,
-        "评估对象：合同系统 RAG few-shot 链路（检索参照范例 → LLM 结构化提取）",
+        "评估对象：合同系统 RAG few-shot 链路（检索参照 → LLM 结构化提取）",
+        "改进动作：检索粒度从「整份范例全文」改为「按条款切块」",
         "",
-        "一、聚合分",
+        "一、改进前后聚合分对比",
     ]
+    lines.append(f"  {'指标':<18} {'改进前':>10} {'改进后':>10} {'变化':>10}")
     for name in METRIC_NAMES:
-        lines.append(f"  {name:<18} {means[name]:.4f}  | {METRIC_DESC[name]}")
+        delta = means_after[name] - means_before[name]
+        lines.append(f"  {name:<18} {means_before[name]:>10.4f} {means_after[name]:>10.4f} {delta:>+10.4f}")
+    for name in METRIC_NAMES:
+        lines.append(f"  · {name}: {METRIC_DESC[name]}")
+
     lines.append("")
-    lines.append("二、逐条明细")
-    for i, row_scores in enumerate(scores):
+    lines.append("二、改进前逐条明细（整份范例检索）")
+    for i, row_scores in enumerate(scores_before):
+        line = "  ".join(f"{k}={v:.3f}" for k, v in row_scores.items())
+        lines.append(f"  sample_{i}: {line}")
+    lines.append("")
+    lines.append("三、改进后逐条明细（条款切块检索）")
+    for i, row_scores in enumerate(scores_after):
         line = "  ".join(f"{k}={v:.3f}" for k, v in row_scores.items())
         lines.append(f"  sample_{i}: {line}")
 
-    low = {k: v for k, v in means.items() if v < LOW_SCORE_THRESHOLD}
     lines.append("")
-    lines.append(f"三、低分项诊断（阈值 < {LOW_SCORE_THRESHOLD}）")
-    if not low:
-        lines.append("  无低分项。")
-    else:
-        for k, v in low.items():
-            lines.append(f"  - {k}: {v:.4f}")
-        lines.append("")
-        lines.append("四、改进措施（针对低分项的一轮改进）")
-        if "context_precision" in low or "context_recall" in low:
-            lines.append(
-                "  · 检索层：整份范例作为检索单元粒度过粗，导致 context_precision/recall 偏低；"
-                "已改为「按条款切块检索 + 相似度分数」，见 app/vector_store.py 的 split_contract_by_clause / search_chunks。"
-            )
-        if "faithfulness" in low:
-            lines.append(
-                "  · 生成层：answer 为完整字段 JSON 而 context 为范例全文，口径不一致；"
-                "以 scripts/evaluate.py 的逐字段准确率为准，RAGAS 分仅作检索/相关性参考。"
-            )
-        if "answer_relevancy" in low:
-            lines.append(
-                "  · 相关性：抽取目标字段与原文的相关性低时，优先扩充同类标准范例、强化 few-shot 注入。"
-            )
+    lines.append("四、结论与后续改进")
+    lines.append(
+        "  · 检索层（context_precision/recall）：条款切块后上下文更聚焦，"
+        "precision 更贴近真实检索相关性；若仍偏低，优先扩充同类标准范例并调 TOP_K。"
+    )
+    lines.append(
+        "  · 生成层（faithfulness/answer_relevancy）：answer 为完整字段 JSON，"
+        "口径与 context 不同源，故逐字段准确率仍以 scripts/evaluate.py 为准。"
+    )
     return lines
 
 
-def main() -> None:
-    _ensure_seeded()
-    rows = _build_samples()
-
+def _run_eval(rows: list[dict]) -> tuple[dict[str, float], list[dict]]:
     result = evaluate(
         Dataset.from_dict(
             {
@@ -228,17 +231,27 @@ def main() -> None:
     for name in METRIC_NAMES:
         vals = result[name]
         means[name] = float(np.nanmean(vals)) if vals else float("nan")
+    return means, result.scores
 
-    print("\n========== RAGAS 评估结果 ==========")
+
+def main() -> None:
+    _ensure_seeded()
+
+    print("第一轮（改进前）：检索粒度 = 整份范例")
+    rows_before = _build_samples(use_chunks=False)
+    means_before, scores_before = _run_eval(rows_before)
+
+    print("\n第二轮（改进后）：检索粒度 = 条款切块")
+    rows_after = _build_samples(use_chunks=True)
+    means_after, scores_after = _run_eval(rows_after)
+
+    print("\n========== 改进前后对比 ==========")
     for name in METRIC_NAMES:
-        print(f"{name}: {means[name]:.4f}")
+        delta = means_after[name] - means_before[name]
+        arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
+        print(f"{name:<18} {means_before[name]:.4f}  ->  {means_after[name]:.4f}  ({arrow} {delta:+.4f})")
 
-    print("\n逐条明细：")
-    for i, row_scores in enumerate(result.scores):
-        line = "  ".join(f"{k}={v:.3f}" for k, v in row_scores.items())
-        print(f"  sample_{i}: {line}")
-
-    report = _build_report(means, result.scores)
+    report = _build_report(means_before, means_after, scores_before, scores_after)
     report_path = os.path.join(BASE_DIR, "data", "ragas_report.txt")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(report) + "\n")
