@@ -13,7 +13,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 CORE = [
+    ("test_unit.py", "核心模块单元测试（纯逻辑）"),
     ("seed_examples.py", "写入向量库范例（RAG 检索库）"),
+    ("eval_classify.py", "分类准确率评估（B2）"),
     ("evaluate.py", "few-shot vs 零样本准确率对比（D2）"),
     ("eval_ocr.py", "文字版 vs 扫描版准确率对比（E）"),
     ("test_agents.py", "多智能体接力验证（D5）"),

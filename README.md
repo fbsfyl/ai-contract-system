@@ -29,8 +29,35 @@
 | 存储 | SQLite（`contracts.db`，含 contracts / payment_plans 两表） |
 | OCR | RapidOCR（PaddleOCR 的 ONNX 运行时版，内置中文模型） |
 | PDF 渲染 | pypdfium2 |
-| 编排 | LangGraph（审查 Agent） |
+| 编排 | LangChain（线性流水线）+ LangGraph（审查/多智能体） |
 | Web | FastAPI + 原生静态页 |
+
+### 技术原理（考核 F：白板讲解要点）
+
+**1. Transformer 与自注意力（分类/提取的 LLM 底座）**
+
+- 合同文本 → 分词/子词（tokenizer）→ 每个 token 映射为向量（embedding）。
+- 自注意力（Self-Attention）：每个 token 与全文其他 token 计算相关性权重（Q·Kᵀ / √d，经 softmax），再对 V 加权求和——这正是「合同金额」与「金额大写」能跨句对齐、分类能抓住「甲方是买方还是卖方」语义关系的机制。
+- 多层堆叠 + 前馈网络，输出被解码为结构化 JSON（本系统用 `response_format=json_object` 约束）。
+
+**2. Embedding 向量化（RAG 底座）**
+
+- `bge-small-zh-v1.5` 把每个合同文本块映射为固定维度向量，训练目标使语义相近的文本在向量空间更近。
+- 本系统把合同按「一行一条款」切块（见 `vector_store.split_contract_by_clause`），逐块向量化。
+
+**3. 余弦相似度检索（把 RAG 当监督学习）**
+
+- 新合同向量 q 与库中范例向量 v 的相似度 = cos(q, v) = (q·v) / (‖q‖‖v‖)，Chroma 用 cosine 距离（1 − 相似度）。
+- 检索 top-k 相似范例作为 few-shot 注入提示词，让 LLM 参照正确字段口径抽取——不训练模型，用检索替代监督信号。
+
+**4. 全链路白板推演**
+
+```
+上传 PDF → 场景分流(文字/扫描OCR) → 合同文本
+  → 按条款切块 → Embedding 向量化 → 余弦相似检索 top-k 范例
+  → few-shot 注入提示词 → LLM 结构化输出(JSON) → Schema 枚举校验
+  → 失败重试兜底 → 入库(台账) → 业财计划 / 审查 Agent
+```
 
 ## 二、目录结构
 
@@ -57,7 +84,7 @@ contract project/
 │   └── static/index.html
 ├── data/
 │   ├── examples/contracts.json  # 5 条标准范例（RAG 检索库）
-│   ├── tests.json               # 2 条测试金标准
+│   ├── tests.json               # 5 条测试金标准（采购/销售/服务/租赁/其他）
 │   ├── sample_contract.pdf      # 政府采购示范文本（空白模板）
 │   ├── filled_contract.pdf      # 已填好的服务器采购合同
 │   ├── scanned_contract.pdf     # 扫描版（图片型 PDF，测 OCR）
@@ -65,8 +92,10 @@ contract project/
 ├── scripts/
 │   ├── seed_examples.py         # 范例写入向量库
 │   ├── evaluate.py              # few-shot 对比评估
-│   ├── ragas_eval.py            # RAGAS 评估（4 指标 + 评估报告）
+│   ├── eval_classify.py         # 分类准确率评估（B2）
 │   ├── eval_ocr.py              # 文字版 vs 扫描版准确率对比
+│   ├── ragas_eval.py            # RAGAS 评估（4 指标 + 评估报告）
+│   ├── test_unit.py             # 核心模块单元测试（unittest）
 │   ├── test_agents.py           # 验证多智能体接力（D5）
 │   ├── generate_sample_pdf.py   # 生成文字版测试 PDF
 │   ├── generate_scanned_pdf.py  # 生成扫描版测试 PDF
@@ -137,7 +166,7 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 | 维度 | 功能 | 验收方式 | 预期结果 |
 |---|---|---|---|
 | B1 变量提取 | 上传 PDF → 提取 13 字段 | 浏览器上传 `filled_contract.pdf` | 名称/甲乙双方/金额/大写/日期/付款方式/违约/争议解决全部正确 |
-| B2 分类 | 合同类型判定（LLM+规则双通道） | 提取结果中「合同类型」字段 | 采购/销售/服务/租赁/其他 之一，且匹配文本；LLM 低置信度时规则兜底 |
+| B2 分类 | 合同类型判定（LLM+规则双通道） | 提取结果中「合同类型」字段；或运行 `scripts\eval_classify.py` | 采购/销售/服务/租赁/其他 之一；10 份样本分类准确率 ≥90%（实测 100%） |
 | B3 信息管理 | 合同台账 | 「已入库合同台账」卡片 | 显示所有合同，含名称/类型/金额/日期 |
 | B5 业财一体化 | 收付款计划 | 台账点「业财」按钮 | 按合同类型判定应收/应付，生成分期计划 |
 | C 技术解耦 | LLM/Embedding 可替换 | 改 `.env` 的 `LLM_BASE_URL` / `EMBEDDING_PROVIDER` | 无需改业务代码即可切换底座 |
@@ -154,12 +183,20 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 
 ### 已知评估数据
 
-`scripts/evaluate.py` 输出（2 条金标准，13+13 字段）：
+`scripts/evaluate.py` 输出（5 条金标准，覆盖 5 类，13×5=65 字段）：
 
 ```
-无 few-shot：96.2%  (25/26)
-有 few-shot：100.0% (26/26)
-提升：+3.8%  ↑ RAG few-shot 有效
+无 few-shot：96.9%  (63/65)
+有 few-shot：100.0% (65/65)
+提升：+3.1%  ↑ RAG few-shot 有效
+```
+
+`scripts/eval_classify.py` 输出（10 份样本：5 范例 + 5 测试金标准）：
+
+```
+规则通道：10/10 = 100.0%
+LLM 通道：10/10 = 100.0%
+（B2 要求 ≥90%，达标）
 ```
 
 `scripts/eval_ocr.py` 输出（同一金标准，13 字段）：
@@ -204,6 +241,8 @@ context_recall: 0.1923
 | `data/scanned_contract.pdf` | 图片型 PDF（模拟扫描件），测 OCR 管线 |
 | `data/table_contract.pdf` | 含 4×4 付款表格的合同，测表格结构化提取 |
 | `data/sample_contract.pdf` | 政府采购示范文本（空白模板），字段多为「未注明」属正常 |
+| `data/examples/contracts.json` | 5 条标准范例（RAG 检索库，few-shot 参照） |
+| `data/tests.json` | 5 条测试金标准（采购/销售/服务/租赁/其他），用于提取+分类评估 |
 
 可重新生成测试 PDF：
 
