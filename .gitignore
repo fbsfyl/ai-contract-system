@@ -1,0 +1,21 @@
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 环境变量（含密钥，绝不提交）
+.env
+
+# 运行时数据（SQLite 台账 / Chroma 向量库）
+contracts.db
+chroma_db/
+
+# 系统文件
+.DS_Store
+Thumbs.db

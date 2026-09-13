@@ -1,0 +1,24 @@
+RAGAS 评估报告
+========================================
+评估对象：合同系统 RAG few-shot 链路（检索参照范例 → LLM 结构化提取）
+
+一、聚合分
+  faithfulness       0.1562  | 抽取结果(answer)与检索到的参照范例(contexts)的一致程度；本系统字段值来自正文，故更多反映「是否遵循范例字段口径」
+  answer_relevancy   0.4029  | 抽取结果(answer)是否紧扣待抽取合同(question)，衡量生成内容与原文的相关性
+  context_precision  0.0000  | 检索到的范例与待抽取合同(question)的相关程度（检索层精度）
+  context_recall     0.1923  | 金标准字段(ground_truth)所需信息被检索范例覆盖的程度（检索层召回）
+
+二、逐条明细
+  sample_0: faithfulness=0.188  answer_relevancy=0.511  context_precision=0.000  context_recall=0.231
+  sample_1: faithfulness=0.125  answer_relevancy=0.295  context_precision=0.000  context_recall=0.154
+
+三、低分项诊断（阈值 < 0.5）
+  - faithfulness: 0.1562
+  - answer_relevancy: 0.4029
+  - context_precision: 0.0000
+  - context_recall: 0.1923
+
+四、改进措施（针对低分项的一轮改进）
+  · 检索层：整份范例作为检索单元粒度过粗，导致 context_precision/recall 偏低；已改为「按条款切块检索 + 相似度分数」，见 app/vector_store.py 的 split_contract_by_clause / search_chunks。
+  · 生成层：answer 为完整字段 JSON 而 context 为范例全文，口径不一致；以 scripts/evaluate.py 的逐字段准确率为准，RAGAS 分仅作检索/相关性参考。
+  · 相关性：抽取目标字段与原文的相关性低时，优先扩充同类标准范例、强化 few-shot 注入。

@@ -1,0 +1,26 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+openai>=1.40
+chromadb>=0.5
+pdfplumber>=0.11
+python-dotenv>=1.0
+python-multipart>=0.0.9
+
+# 本地 Embedding 方案（EMBEDDING_PROVIDER=local 时需要，会拉取 torch 依赖）
+# 若改用 API Embedding（EMBEDDING_PROVIDER=api）可注释掉下面这行
+sentence-transformers>=2.6
+
+# 生成测试用文字版合同 PDF（scripts/generate_sample_pdf.py）
+reportlab>=4.0
+
+# LangGraph 审查 Agent（app/review_agent.py）
+langgraph>=1.0
+
+# 扫描件 OCR 管线（app/ocr.py，考核 E）
+rapidocr>=3.0
+pypdfium2>=5.0
+
+# RAGAS 评估（scripts/ragas_eval.py，考核 D2 进阶）
+# 会引入 langchain / datasets / pandas 等依赖
+ragas>=0.4

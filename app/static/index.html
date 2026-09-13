@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 合同系统（最小集）</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: "Microsoft YaHei", system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+    header { background: #1f2d3d; color: #fff; padding: 20px 32px; }
+    header h1 { margin: 0; font-size: 20px; }
+    header p { margin: 6px 0 0; font-size: 13px; color: #b8c4d0; }
+    main { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .card h2 { margin: 0 0 12px; font-size: 16px; }
+    .upload-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    button { background: #2f80ed; color: #fff; border: 0; padding: 9px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    button:disabled { background: #9bb8dd; cursor: not-allowed; }
+    .hint { color: #888; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f0f2f5; width: 160px; }
+    .badge { display: inline-block; background: #e8f3ff; color: #2f80ed; border-radius: 4px; padding: 1px 8px; font-size: 12px; }
+    .error { color: #d93025; }
+    .muted { color: #999; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI 合同系统（最小集）</h1>
+    <p>上传 PDF → 文字分流 → RAG few-shot 检索 → LLM 结构化提取 → 入库回显</p>
+  </header>
+  <main>
+    <div class="card">
+      <h2>上传合同 PDF</h2>
+      <div class="upload-row">
+        <input type="file" id="file" accept=".pdf" />
+        <button id="btn" onclick="extract()">提取并入库</button>
+        <span class="hint" id="status">等待选择文件…</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>检索可视化（RAG 向量库）</h2>
+      <div class="upload-row">
+        <input type="text" id="searchQ" placeholder="输入关键词，如：采购 服务器" style="flex:1; padding:8px;" />
+        <button onclick="search()">检索</button>
+      </div>
+      <div id="searchResult" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>多智能体接力（D5）</h2>
+      <p class="hint">分类 Agent → 提取 Agent → 校验 Agent → 审查 Agent，校验失败自动自我修正重来。</p>
+      <textarea id="agentsText" rows="6" style="width:100%; padding:8px; font-size:13px;">服务器采购合同
+合同编号：HT-CG-2025-102
+合同名称：服务器设备采购合同
+甲方（采购方）：南京某某云计算有限公司
+乙方（供应方）：苏州某某信息技术有限公司
+合同金额：人民币 480000 元（大写：肆拾捌万元整）
+签订日期：2025年2月20日
+履行期限：自2025年2月20日至2025年3月31日
+付款方式：合同签订后预付50%，安装调试合格后支付50%
+违约责任：乙方逾期交货的，每逾期一日按合同金额的0.5%向甲方支付违约金
+争议解决：双方协商不成的，向甲方所在地人民法院提起诉讼
+合同类型：采购</textarea>
+      <div class="upload-row" style="margin-top:10px;">
+        <button id="agentsBtn" onclick="runAgents()">运行多智能体</button>
+        <span class="hint" id="agentsStatus">就绪。</span>
+      </div>
+      <div id="agentsResult" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card" id="resultCard" style="display:none;">
+      <h2>提取结果 <span id="sceneBadge"></span></h2>
+      <div id="result"></div>
+    </div>
+
+    <div class="card" id="opsCard" style="display:none;">
+      <h2>审查与业财</h2>
+      <div id="opsResult"></div>
+    </div>
+
+    <div class="card">
+      <h2>已入库合同台账</h2>
+      <button onclick="loadContracts()">刷新</button>
+      <div id="contracts" style="margin-top:12px;"></div>
+    </div>
+  </main>
+
+  <script>
+    const FIELDS = [
+      ["contract_name","合同名称"],["contract_no","合同编号"],["contract_type","合同类型"],
+      ["party_a","甲方"],["party_b","乙方"],["amount","合同金额(元)"],
+      ["amount_capital","金额大写"],["sign_date","签订日期"],["term_start","履行开始"],
+      ["term_end","履行结束"],["payment_method","付款方式"],["breach_liability","违约责任"],
+      ["dispute_resolution","争议解决"]
+    ];
+
+    async function extract() {
+      const file = document.getElementById("file").files[0];
+      if (!file) { setStatus("请先选择 PDF 文件", true); return; }
+      const btn = document.getElementById("btn");
+      btn.disabled = true;
+      setStatus("处理中…", false);
+
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const resp = await fetch("/api/extract", { method: "POST", body: fd });
+        const data = await resp.json();
+        if (data.scene === "scanned") {
+          document.getElementById("resultCard").style.display = "block";
+          document.getElementById("sceneBadge").innerHTML = '<span class="badge">扫描件</span>';
+          document.getElementById("result").innerHTML =
+            '<p class="error">扫描件 OCR 识别失败，未提取到有效文本。请确认 PDF 清晰度后重试。</p>';
+          return;
+        }
+        renderResult(data);
+        setStatus("提取完成", false);
+        loadContracts();
+      } catch (e) {
+        setStatus("出错：" + e.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderResult(data) {
+      document.getElementById("resultCard").style.display = "block";
+      document.getElementById("sceneBadge").innerHTML =
+        '<span class="badge">' + sceneLabel(data.scene) + "</span>";
+      const c = data.contract;
+      let html = '<table>';
+      for (const [key, label] of FIELDS) {
+        html += `<tr><th>${label}</th><td>${escapeHtml(c[key] ?? "—")}</td></tr>`;
+      }
+      if (c.type_confidence !== undefined) {
+        html += `<tr><th>分类置信度</th><td>${Math.round(c.type_confidence * 100)}%</td></tr>`;
+      }
+      html += `<tr><th>RAG 参照范例</th><td>${(data.rag_examples || []).map(escapeHtml).join("、") || "无"}</td></tr>`;
+      html += "</table>";
+      const cid = c.id;
+      html += '<div style="margin-top:12px;">' +
+        `<button onclick="reviewContract(${cid})">LangGraph 审查</button> ` +
+        `<button onclick="generateFinance(${cid})">生成收付款计划</button>` +
+        '</div>';
+      document.getElementById("result").innerHTML = html;
+    }
+
+    async function loadContracts() {
+      try {
+        const resp = await fetch("/api/contracts");
+        const rows = await resp.json();
+        const div = document.getElementById("contracts");
+        if (!rows.length) { div.innerHTML = '<p class="muted">暂无入库合同。</p>'; return; }
+        let html = '<table><tr><th>#</th><th>名称</th><th>类型</th><th>甲方</th><th>乙方</th><th>金额(元)</th><th>签订日期</th><th>操作</th></tr>';
+        for (const r of rows) {
+          html += `<tr><td>${r.id}</td><td>${escapeHtml(r.contract_name)}</td><td>${escapeHtml(r.contract_type)}</td>` +
+                  `<td>${escapeHtml(r.party_a)}</td><td>${escapeHtml(r.party_b)}</td><td>${r.amount}</td><td>${escapeHtml(r.sign_date)}</td>` +
+                  `<td><button onclick="reviewContract(${r.id})">审查</button> <button onclick="generateFinance(${r.id})">业财</button></td></tr>`;
+        }
+        html += "</table>";
+        div.innerHTML = html;
+      } catch (e) {
+        document.getElementById("contracts").innerHTML = '<p class="error">加载失败：' + e.message + "</p>";
+      }
+    }
+
+    async function search() {
+      const q = document.getElementById("searchQ").value.trim();
+      const div = document.getElementById("searchResult");
+      if (!q) { div.innerHTML = '<p class="muted">请输入关键词。</p>'; return; }
+      div.innerHTML = '<p class="muted">检索中…</p>';
+      try {
+        const resp = await fetch("/api/search?q=" + encodeURIComponent(q));
+        const r = await resp.json();
+        let html = '';
+        if (r.examples && r.examples.length) {
+          html += '<h3>整份范例命中</h3><table><tr><th>相似度</th><th>类型</th><th>范例</th></tr>';
+          for (const e of r.examples) {
+            html += `<tr><td>${e.similarity}</td><td>${escapeHtml(e.contract_type)}</td><td>${escapeHtml((e.text || '').slice(0, 60))}…</td></tr>`;
+          }
+          html += '</table>';
+        }
+        if (r.chunks && r.chunks.length) {
+          html += '<h3>条款切块命中</h3><table><tr><th>相似度</th><th>类型</th><th>条款</th></tr>';
+          for (const c of r.chunks) {
+            html += `<tr><td>${c.similarity}</td><td>${escapeHtml(c.contract_type)}</td><td>${escapeHtml(c.text)}</td></tr>`;
+          }
+          html += '</table>';
+        }
+        div.innerHTML = html || '<p class="muted">无检索结果（请先运行 seed_examples.py 写入范例）。</p>';
+      } catch (e) {
+        div.innerHTML = '<p class="error">检索失败：' + e.message + '</p>';
+      }
+    }
+
+    async function runAgents() {
+      const text = document.getElementById("agentsText").value.trim();
+      const div = document.getElementById("agentsResult");
+      const btn = document.getElementById("agentsBtn");
+      if (!text) { document.getElementById("agentsStatus").textContent = "请先输入合同文本"; return; }
+      btn.disabled = true;
+      document.getElementById("agentsStatus").textContent = "多智能体运行中…";
+      div.innerHTML = '<p class="muted">运行中…</p>';
+      try {
+        const resp = await fetch("/api/agents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
+        const r = await resp.json();
+        let html = '<h3>接力轨迹</h3><table><tr><th>Agent</th><th>结果</th></tr>';
+        for (const step of r.trace || []) {
+          let detail = "";
+          if (step.agent.indexOf("分类") >= 0) detail = step.contract_type + "（置信度 " + Math.round((step.confidence || 0) * 100) + "%）";
+          else if (step.agent.indexOf("提取") >= 0) detail = step.contract_name + "（参照范例 " + (step.reference_examples || []).join("、") + "）";
+          else if (step.agent.indexOf("校验") >= 0) detail = step.passed ? "通过" : "发现 " + step.errors.length + " 处错误，触发自我修正";
+          else if (step.agent.indexOf("审查") >= 0) detail = verdictLabel(step.verdict) + (step.risks && step.risks.length ? "（风险 " + step.risks.length + " 条）" : "");
+          html += '<tr><td>' + escapeHtml(step.agent) + '</td><td>' + escapeHtml(detail) + '</td></tr>';
+        }
+        html += '</table>';
+        html += '<p><b>分类：</b>' + escapeHtml(r.contract_type) + '　<b>提取次数：</b>' + r.extract_attempts +
+                '　<b>审查结论：</b><span class="badge">' + verdictLabel(r.verdict) + '</span></p>';
+        if (r.residual_errors && r.residual_errors.length) {
+          html += '<p class="error">残错（超过重试上限）：' + r.residual_errors.map(escapeHtml).join('；') + '</p>';
+        }
+        if (r.risks && r.risks.length) html += '<p><b>风险点：</b>' + r.risks.map(escapeHtml).join('；') + '</p>';
+        div.innerHTML = html;
+        document.getElementById("agentsStatus").textContent = "完成。";
+      } catch (e) {
+        div.innerHTML = '<p class="error">运行失败：' + e.message + '</p>';
+        document.getElementById("agentsStatus").textContent = "出错";
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function sceneLabel(s) {
+      return { text: "文字版(直接抽文本)", scanned: "扫描件(OCR)", scanned_ocr: "扫描件(OCR识别)", scanned_table: "扫描件(OCR+表格结构化)" }[s] || s;
+    }
+
+    function verdictLabel(v) {
+      return {pass:"通过", supplement:"需补充材料", reject:"拒绝", human:"人工介入"}[v] || v;
+    }
+
+    async function reviewContract(id) {
+      const div = document.getElementById("opsResult");
+      document.getElementById("opsCard").style.display = "block";
+      div.innerHTML = '<p class="muted">审查中…</p>';
+      try {
+        const resp = await fetch("/api/review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contract_id: id })
+        });
+        const r = await resp.json();
+        if (r.error) { div.innerHTML = '<p class="error">' + r.error + '</p>'; return; }
+        let html = '<h3>结论：<span class="badge">' + verdictLabel(r.verdict) + '</span>（回路 ' + r.iterations + ' 次）</h3>';
+        if (r.risks && r.risks.length) html += '<p><b>风险点：</b>' + r.risks.map(escapeHtml).join('；') + '</p>';
+        if (r.supplements && r.supplements.length) {
+          const uniq = [...new Set(r.supplements)];
+          html += '<p><b>补材料记录：</b>' + uniq.map(escapeHtml).join('、') + '</p>';
+        }
+        if (r.history && r.history.length) {
+          html += '<table><tr><th>轮次</th><th>结论</th><th>缺失项</th></tr>';
+          r.history.forEach(h => {
+            html += '<tr><td>' + h.iteration + '</td><td>' + verdictLabel(h.verdict) + '</td><td>' +
+                    (h.missing || []).map(escapeHtml).join('、') + '</td></tr>';
+          });
+          html += '</table>';
+        }
+        div.innerHTML = html;
+      } catch (e) { div.innerHTML = '<p class="error">审查失败：' + e.message + '</p>'; }
+    }
+
+    async function generateFinance(id) {
+      const div = document.getElementById("opsResult");
+      document.getElementById("opsCard").style.display = "block";
+      div.innerHTML = '<p class="muted">生成中…</p>';
+      try {
+        const resp = await fetch("/api/contracts/" + id + "/finance", { method: "POST" });
+        const r = await resp.json();
+        if (r.error) { div.innerHTML = '<p class="error">' + r.error + '</p>'; return; }
+        let html = '<h3>收付款计划：<span class="badge">' + escapeHtml(r.direction) + '</span></h3>' +
+                   '<table><tr><th>期数</th><th>阶段</th><th>比例</th><th>金额(元)</th><th>触发条件</th></tr>';
+        (r.plans || []).forEach((p, i) => {
+          html += '<tr><td>' + (i + 1) + '</td><td>' + escapeHtml(p.stage) + '</td><td>' +
+                  Math.round(p.ratio * 100) + '%</td><td>' + p.amount + '</td><td>' + escapeHtml(p.condition) + '</td></tr>';
+        });
+        html += '</table>';
+        div.innerHTML = html;
+      } catch (e) { div.innerHTML = '<p class="error">生成失败：' + e.message + '</p>'; }
+    }
+
+    function setStatus(msg, isError) {
+      const el = document.getElementById("status");
+      el.textContent = msg;
+      el.className = "hint" + (isError ? " error" : "");
+    }
+    function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+    loadContracts();
+  </script>
+</body>
+</html>
