@@ -1,4 +1,4 @@
-# 一键启动 AI 合同系统（Windows PowerShell）
+﻿# 一键启动 AI 合同系统（Windows PowerShell）
 # 用法：在项目根目录执行  .\start.ps1
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot

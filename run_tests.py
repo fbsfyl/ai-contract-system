@@ -14,6 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 CORE = [
     ("test_unit.py", "核心模块单元测试（纯逻辑）"),
+    ("test_b3_b4.py", "B3 信息管理 + B4 加固端到端测试（HTTP）"),
     ("seed_examples.py", "写入向量库范例（RAG 检索库）"),
     ("eval_classify.py", "分类准确率评估（B2）"),
     ("evaluate.py", "few-shot vs 零样本准确率对比（D2）"),
