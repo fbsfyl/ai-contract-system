@@ -85,7 +85,7 @@ contract project/
 │   ├── store.py         # SQLite 入库/查询 + 收付款计划 + 状态机 + 台账看板
 │   └── static/index.html
 ├── data/
-│   ├── examples/contracts.json  # 5 条标准范例（RAG 检索库）
+│   ├── examples/contracts.json  # 10 条标准范例（RAG 检索库）
 │   ├── tests.json               # 10 条测试金标准（采购/销售/服务/租赁/其他 各 2 条）
 │   ├── templates.json           # 5 类合同模板 + 条款库（B3 起草）
 │   ├── sample_contract.pdf      # 政府采购示范文本（空白模板）
@@ -118,8 +118,11 @@ contract project/
 │           ├── contract_security.xml  # 权限组
 │           └── ir.model.access.csv
 ├── Dockerfile
-├── docker-compose.yml
-├── start.ps1                    # 一键启动脚本
+├── docker-compose.yml           # FastAPI 应用容器化
+├── docker-compose.odoo.yml      # Odoo 16 + PostgreSQL 一键启动
+├── start.ps1                    # 一键启动 FastAPI（前台）
+├── start_all.ps1                # 一键启动全部服务（后台）
+├── stop_all.ps1                 # 一键关闭全部服务
 ├── run_tests.py                 # 一键跑全部测试用例
 ├── .gitignore
 ├── .dockerignore
@@ -158,8 +161,24 @@ copy .env.example .env
 ### 一键启动（推荐）
 
 ```powershell
-.\start.ps1    # 自动创建 venv、装依赖、seed 范例、起服务
+.\start.ps1        # 仅启动 AI 合同系统（FastAPI），前台运行
+.\start_all.ps1    # 一键启动全部服务（FastAPI + Odoo 16 + PostgreSQL），后台运行
+.\stop_all.ps1     # 一键关闭全部服务
 ```
+
+`start_all.ps1` 会后台启动 FastAPI（监听 `0.0.0.0:8000` 供 Odoo 容器访问）和 Odoo/PostgreSQL 容器，关窗口不影响。启动完成后可访问：
+
+- FastAPI：http://127.0.0.1:8000
+- Odoo：http://localhost:8069 （admin / admin）
+
+查看实时日志（另开 PowerShell 窗口）：
+
+```powershell
+Get-Content logs\app.log -Wait          # 业务 + HTTP 请求日志（主日志，UTF-8 带 BOM）
+Get-Content logs\fastapi_error.log -Wait  # uvicorn 进程 stderr（启动报错/崩溃时看）
+```
+
+关闭全部服务：`.\stop_all.ps1`
 
 ### Docker 化启动
 
@@ -218,9 +237,8 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 - 自定义 view（form / tree）+ 菜单 + 权限组（合同管理员）
 - AI 集成按钮（全部通过 HTTP 调外部 FastAPI，Odoo 不内嵌 AI）：
   - `从 PDF 导入`：上传 PDF → 调 `/api/extract_contract` → 解析 + 多智能体提取 + 审查 → 回填 13 字段 + 审查结论/风险点
-  - `AI 提取`：对已填「合同原文」调 `/api/agents` 多智能体接力
   - `生成付款计划`：调 `/api/finance_plan` → LLM 提取分期节点 → 生成收付款计划
-  - `检索相似范例`：调 `/api/search` → RAG 检索相似合同 + 相似度回填
+  - `检索相似范例`：调 `/api/search` → RAG 检索相似合同 + 相似度回填 + 弹窗展示
 
 **三个解耦（附加理念分）**
 
@@ -229,6 +247,18 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 3. 编排解耦：Agent 编排层（LangChain/LangGraph）独立在 `app/` 里，Odoo 无感知
 
 **安装运行（Odoo 16）**
+
+一键启动（推荐，Docker）：
+
+```powershell
+docker compose -f docker-compose.odoo.yml up -d
+```
+
+首次启动会自动拉取 `odoo:16` + `postgres:16` 镜像、启动数据库、安装「合同管理（AI 集成）」模块。启动完成后访问 http://localhost:8069 （默认账号 admin / admin）。
+
+> 容器内 Odoo 调外部 AI 服务时，宿主机地址是 `host.docker.internal`（Windows/Mac）。`docker-compose.odoo.yml` 已自动注入 `AI_SERVICE_URL=http://host.docker.internal:8000`，无需手动配置；如需覆盖，可在「设置 → 技术 → 系统参数」配置 `contract.ai_service_url`。
+
+手动安装（已有 Odoo 环境）：
 
 ```powershell
 # 1. 把 addon 目录加入 Odoo 的 addons_path（或软链进 addons 目录）
@@ -250,11 +280,11 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 提升：+1.5%  ↑ RAG few-shot 有效
 ```
 
-`scripts/eval_classify.py` 输出（15 份样本：5 范例 + 10 测试金标准）：
+`scripts/eval_classify.py` 输出（20 份样本：10 范例 + 10 测试金标准）：
 
 ```
-规则通道：15/15 = 100.0%
-LLM 通道：15/15 = 100.0%
+规则通道：19/20 = 95.0%
+LLM 通道：20/20 = 100.0%
 （B2 要求 ≥90%，达标）
 ```
 
@@ -309,7 +339,7 @@ LLM 通道：15/15 = 100.0%
 | `data/scanned_contract.pdf` | 图片型 PDF（模拟扫描件），测 OCR 管线 |
 | `data/table_contract.pdf` | 含 4×4 付款表格的合同，测表格结构化提取 |
 | `data/sample_contract.pdf` | 政府采购示范文本（空白模板），字段多为「未注明」属正常 |
-| `data/examples/contracts.json` | 5 条标准范例（RAG 检索库，few-shot 参照） |
+| `data/examples/contracts.json` | 10 条标准范例（RAG 检索库，few-shot 参照） |
 | `data/tests.json` | 10 条测试金标准（采购/销售/服务/租赁/其他 各 2 条），用于提取+分类评估 |
 
 可重新生成测试 PDF：

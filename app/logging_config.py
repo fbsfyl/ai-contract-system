@@ -56,8 +56,10 @@ def setup_logging() -> Path:
     console.setLevel(logging.INFO)
     console.setFormatter(fmt)
 
+    # utf-8-sig（带 BOM）：Windows PowerShell 5.1 的 Get-Content 默认按 GBK 读取，
+    # 带 BOM 才能自动识别为 UTF-8，避免中文日志乱码。
     file_handler = RotatingFileHandler(
-        log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8-sig"
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(fmt)

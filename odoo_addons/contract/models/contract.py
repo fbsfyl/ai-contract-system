@@ -1,5 +1,6 @@
 """合同（考核 C：自建 model，承载合同业务，AI 能力走外部服务解耦调用）。"""
 import logging
+import os
 from datetime import datetime
 
 from odoo import _, api, fields, models
@@ -77,9 +78,14 @@ class ContractContract(models.Model):
     reference_examples = fields.Char(string="RAG 参照范例")
 
     def _ai_service_url(self):
-        """AI 服务地址（业务解耦：Odoo 不内嵌 AI，只通过 HTTP 调外部服务）。"""
+        """AI 服务地址（业务解耦：Odoo 不内嵌 AI，只通过 HTTP 调外部服务）。
+
+        优先级：ir.config_parameter 显式配置 > 环境变量 AI_SERVICE_URL > 本机默认。
+        容器内访问宿主机需用 host.docker.internal（docker compose 已注入该环境变量）。
+        """
         return (
             self.env["ir.config_parameter"].sudo().get_param("contract.ai_service_url")
+            or os.environ.get("AI_SERVICE_URL")
             or "http://127.0.0.1:8000"
         )
 
@@ -137,32 +143,6 @@ class ContractContract(models.Model):
             "view_mode": "form",
             "target": "current",
         }
-
-    def action_ai_extract(self):
-        """对已填写的合同原文跑多智能体提取 + 审查（考核 D5）。"""
-        self.ensure_one()
-        if not self.ai_text or not self.ai_text.strip():
-            raise UserError(_("请先上传 PDF 导入合同原文，或填写「合同原文」后再执行 AI 提取"))
-
-        import requests
-
-        url = self._ai_service_url().rstrip("/") + "/api/agents"
-        try:
-            resp = requests.post(url, json={"text": self.ai_text}, timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as exc:
-            logger.exception("调用 AI 服务失败")
-            raise UserError(_("调用 AI 服务失败（%s）：%s") % (url, exc)) from exc
-
-        contract = data.get("contract") or {}
-        self._apply_ai_result(
-            contract,
-            data.get("verdict") or "",
-            data.get("risks") or [],
-            data.get("reference_examples") or [],
-        )
-        return self._reload_action()
 
     def action_import_pdf(self):
         """上传 PDF → 外部 AI 服务解析 + 多智能体提取 + 审查 → 回填字段（核心整合）。"""
@@ -260,7 +240,33 @@ class ContractContract(models.Model):
         examples = data.get("examples") or []
         refs = [f"{e.get('id')}（相似度 {e.get('similarity', 0):.2f}）" for e in examples]
         self.reference_examples = ", ".join(refs) or "未找到相似范例"
-        return self._reload_action()
+
+        # 弹窗展示检索结果（结果仍回填字段，同时以通知形式弹出便于查看）
+        if examples:
+            rows = "".join(
+                f"<li>{e.get('contract_type', '')} · {e.get('id')} · 相似度 {e.get('similarity', 0):.2f}</li>"
+                for e in examples
+            )
+            return {
+                "type": "ir.actions.client",
+                "tag": "display_notification",
+                "params": {
+                    "title": _("检索到 %d 条相似范例") % len(examples),
+                    "message": f"<ul style='margin:0;padding-left:18px;'>{rows}</ul>",
+                    "type": "success",
+                    "sticky": True,
+                },
+            }
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("检索相似范例"),
+                "message": _("未找到相似范例"),
+                "type": "warning",
+                "sticky": True,
+            },
+        }
 
     @api.model
     def create(self, vals):

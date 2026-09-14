@@ -24,7 +24,6 @@
       <form string="合同">
         <header>
           <button name="action_import_pdf" type="object" string="从 PDF 导入" class="btn-primary"/>
-          <button name="action_ai_extract" type="object" string="AI 提取"/>
           <button name="action_generate_finance" type="object" string="生成付款计划"/>
           <button name="action_search_similar" type="object" string="检索相似范例"/>
           <button name="action_advance" type="object" string="推进状态"/>
@@ -54,8 +53,9 @@
             <field name="breach_liability"/>
             <field name="dispute_resolution"/>
           </group>
+          <newline/>
           <group string="收付款计划（业财一体化）">
-            <field name="payment_plan_ids" nolabel="1">
+            <field name="payment_plan_ids" nolabel="1" colspan="2">
               <tree editable="bottom">
                 <field name="sequence"/>
                 <field name="direction"/>

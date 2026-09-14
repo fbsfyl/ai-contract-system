@@ -1,0 +1,45 @@
+# Odoo 16 一键启动（合同管理模块 contract）
+# 用法：docker compose -f docker-compose.odoo.yml up -d
+# 启动后访问 http://localhost:8069（默认 admin / admin）
+services:
+  odoo-db:
+    image: postgres:16
+    container_name: odoo-db
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+    volumes:
+      - odoo_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  odoo-web:
+    image: odoo:16
+    container_name: odoo-web
+    depends_on:
+      odoo-db:
+        condition: service_healthy
+    ports:
+      - "8069:8069"
+    environment:
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: odoo
+      # 容器内访问宿主机 AI 服务（业务解耦：Odoo 通过 HTTP 调外部 FastAPI）
+      AI_SERVICE_URL: http://host.docker.internal:8000
+    volumes:
+      # 挂载自定义 addon（只写 addons，不改 Odoo 源码）
+      - ./odoo_addons/contract:/mnt/extra-addons/contract
+      - odoo_data:/var/lib/odoo
+    # 启动即安装「合同管理（AI 集成）」模块（幂等：已安装则更新）
+    command: ["odoo", "-i", "contract", "-d", "postgres"]
+    restart: unless-stopped
+
+volumes:
+  odoo_pgdata:
+  odoo_data:

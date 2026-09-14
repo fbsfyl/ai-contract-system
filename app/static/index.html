@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI 合同系统（最小集）</title>
+  <title>AI 合同系统</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: "Microsoft YaHei", system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
@@ -27,7 +27,7 @@
 </head>
 <body>
   <header>
-    <h1>AI 合同系统（最小集）</h1>
+    <h1>AI 合同系统</h1>
     <p>上传 PDF → 文字分流 → RAG few-shot 检索 → LLM 结构化提取 → 入库回显</p>
     <div id="loginBar" style="margin-top:10px;">
       <input type="text" id="loginUser" placeholder="账号" value="admin" style="padding:6px;border-radius:4px;border:0;" />
@@ -40,6 +40,7 @@
   <main>
     <div class="card">
       <h2>上传合同 PDF</h2>
+      <p class="hint">上传合同 PDF，自动识别文字版/扫描件，提取 13 个结构化字段并入库。</p>
       <div class="upload-row">
         <input type="file" id="file" accept=".pdf" />
         <button id="btn" onclick="extract()">提取并入库</button>
@@ -48,7 +49,8 @@
     </div>
 
     <div class="card">
-      <h2>检索可视化（RAG 向量库）</h2>
+      <h2>检索可视化（RAG 向量库 · 调试工具）</h2>
+      <p class="hint">调试用途：手动查看向量库命中的相似范例与条款、相似度。正常上传合同时无需操作，提取环节会自动完成检索。</p>
       <div class="upload-row">
         <input type="text" id="searchQ" placeholder="输入关键词，如：采购 服务器" style="flex:1; padding:8px;" />
         <button onclick="search()">检索</button>
@@ -57,8 +59,8 @@
     </div>
 
     <div class="card">
-      <h2>多智能体接力（D5）</h2>
-      <p class="hint">分类 Agent → 提取 Agent → 校验 Agent → 审查 Agent，校验失败自动自我修正重来。</p>
+      <h2>多智能体接力演示</h2>
+      <p class="hint">分类 Agent → 提取 Agent → 校验 Agent → 审查 Agent，校验失败自动自我修正重来。本卡片仅演示多智能体编排轨迹，结果不入库。</p>
       <textarea id="agentsText" rows="6" style="width:100%; padding:8px; font-size:13px;">服务器采购合同
 合同编号：HT-CG-2025-102
 合同名称：服务器设备采购合同
@@ -89,7 +91,8 @@
     </div>
 
     <div class="card">
-      <h2>台账看板（B3）</h2>
+      <h2>台账看板</h2>
+      <p class="hint">按类型、状态统计已入库合同（数量与金额），可导出 CSV。</p>
       <div class="upload-row">
         <button onclick="loadDashboard()">刷新看板</button>
         <button onclick="exportCsv()">导出 CSV</button>
@@ -98,7 +101,7 @@
     </div>
 
     <div class="card">
-      <h2>要素拼装起草（B3）</h2>
+      <h2>要素拼装起草</h2>
       <p class="hint">选模板 → 填要素 → 自动编号 + 拼装正文 + 入库。</p>
       <div class="upload-row" style="margin-bottom:8px;">
         <label>类型：</label>
