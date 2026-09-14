@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <!-- 动作 -->
+  <record id="action_contract_contract" model="ir.actions.act_window">
+    <field name="name">合同台账</field>
+    <field name="res_model">contract.contract</field>
+    <field name="view_mode">tree,form</field>
+  </record>
+
+  <record id="action_contract_counterparty" model="ir.actions.act_window">
+    <field name="name">相对方 / 签约主体</field>
+    <field name="res_model">contract.counterparty</field>
+    <field name="view_mode">tree,form</field>
+  </record>
+
+  <!-- 菜单 -->
+  <menuitem id="menu_contract_root" name="合同管理" sequence="10"/>
+
+  <menuitem id="menu_contract_contract" name="合同台账"
+            parent="menu_contract_root" action="action_contract_contract" sequence="10"/>
+
+  <menuitem id="menu_contract_counterparty" name="相对方 / 签约主体"
+            parent="menu_contract_root" action="action_contract_counterparty" sequence="20"/>
+</odoo>

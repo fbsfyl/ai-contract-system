@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_contract_contract_user,contract.contract.user,model_contract_contract,base.group_user,1,0,0,0
+access_contract_contract_manager,contract.contract.manager,model_contract_contract,group_contract_manager,1,1,1,1
+access_contract_counterparty_user,contract.counterparty.user,model_contract_counterparty,base.group_user,1,0,0,0
+access_contract_counterparty_manager,contract.counterparty.manager,model_contract_counterparty,group_contract_manager,1,1,1,1
+access_contract_payment_plan_user,contract.payment.plan.user,model_contract_payment_plan,base.group_user,1,0,0,0
+access_contract_payment_plan_manager,contract.payment.plan.manager,model_contract_payment_plan,group_contract_manager,1,1,1,1

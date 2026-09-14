@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_contract_contract_tree" model="ir.ui.view">
+    <field name="name">contract.contract.tree</field>
+    <field name="model">contract.contract</field>
+    <field name="arch" type="xml">
+      <tree string="合同台账">
+        <field name="contract_name"/>
+        <field name="contract_no"/>
+        <field name="contract_type"/>
+        <field name="party_a"/>
+        <field name="party_b"/>
+        <field name="amount"/>
+        <field name="sign_date"/>
+        <field name="status"/>
+      </tree>
+    </field>
+  </record>
+
+  <record id="view_contract_contract_form" model="ir.ui.view">
+    <field name="name">contract.contract.form</field>
+    <field name="model">contract.contract</field>
+    <field name="arch" type="xml">
+      <form string="合同">
+        <header>
+          <button name="action_import_pdf" type="object" string="从 PDF 导入" class="btn-primary"/>
+          <button name="action_ai_extract" type="object" string="AI 提取"/>
+          <button name="action_generate_finance" type="object" string="生成付款计划"/>
+          <button name="action_search_similar" type="object" string="检索相似范例"/>
+          <button name="action_advance" type="object" string="推进状态"/>
+          <button name="action_cancel" type="object" string="作废" confirm="确认作废该合同？"/>
+          <field name="status" widget="statusbar" readonly="1"/>
+        </header>
+        <sheet>
+          <group>
+            <group string="基本信息">
+              <field name="contract_name"/>
+              <field name="contract_no"/>
+              <field name="contract_type"/>
+              <field name="counterparty_id"/>
+              <field name="amount"/>
+              <field name="amount_capital"/>
+              <field name="sign_date"/>
+              <field name="term_start"/>
+              <field name="term_end"/>
+            </group>
+            <group string="签约双方">
+              <field name="party_a"/>
+              <field name="party_b"/>
+            </group>
+          </group>
+          <group string="条款">
+            <field name="payment_method"/>
+            <field name="breach_liability"/>
+            <field name="dispute_resolution"/>
+          </group>
+          <group string="收付款计划（业财一体化）">
+            <field name="payment_plan_ids" nolabel="1">
+              <tree editable="bottom">
+                <field name="sequence"/>
+                <field name="direction"/>
+                <field name="stage"/>
+                <field name="ratio"/>
+                <field name="amount"/>
+                <field name="condition"/>
+              </tree>
+            </field>
+          </group>
+          <group string="AI 集成（业务解耦：AI 走外部服务）">
+            <field name="pdf_file"/>
+            <field name="ai_text" readonly="1"/>
+            <field name="ai_verdict"/>
+            <field name="ai_risks"/>
+            <field name="reference_examples"/>
+          </group>
+        </sheet>
+      </form>
+    </field>
+  </record>
+</odoo>

@@ -79,6 +79,12 @@ class DraftRequest(BaseModel):
     amount_capital: str = ""
 
 
+class FinancePlanRequest(BaseModel):
+    contract_type: str = "其他"
+    payment_method: str = ""
+    amount: float = 0.0
+
+
 # 登录鉴权（考核 B4）：内存 token，演示级
 _ACTIVE_TOKENS: set[str] = set()
 
@@ -108,6 +114,22 @@ def login(req: LoginRequest):
     raise HTTPException(status_code=401, detail="账号或密码错误")
 
 
+def _parse_pdf(tmp_path: str) -> tuple[str, str]:
+    """PDF → 纯文本（文字版直接抽，扫描件走 OCR + 表格），返回 (text, scene)。"""
+    text, scene = pdf_loader.extract_text_from_pdf(tmp_path)
+    logger.info("PDF 场景分流：%s（%d 字符）", scene, len(text))
+    if scene == "scanned":
+        text = ocr.ocr_pdf(tmp_path)
+        # 复杂表格/骑缝章/歪斜：结构化提取，作为全文的结构化补充
+        table_text = table.extract_tables_from_pdf(tmp_path)
+        if table_text.strip():
+            text = (text + "\n\n" + table_text).strip()
+            scene = "scanned_table"
+        elif text.strip():
+            scene = "scanned_ocr"
+    return text, scene
+
+
 @app.post("/api/extract", response_model=ExtractResponse)
 async def extract_contract(file: UploadFile = File(...)):
     start = time.perf_counter()
@@ -121,23 +143,9 @@ async def extract_contract(file: UploadFile = File(...)):
 
     try:
         # 2. PDF 场景分流（文字版直接抽文本，扫描件走 OCR + 表格管线）
-        text, scene = pdf_loader.extract_text_from_pdf(tmp_path)
-        logger.info("PDF 场景分流：%s（%d 字符）", scene, len(text))
-        if scene == "scanned":
-            text = ocr.ocr_pdf(tmp_path)
-            # 复杂表格/骑缝章/歪斜：结构化提取，作为全文的结构化补充
-            table_text = table.extract_tables_from_pdf(tmp_path)
-            if table_text.strip():
-                text = (text + "\n\n" + table_text).strip()
-                scene = "scanned_table"
-            elif text.strip():
-                scene = "scanned_ocr"
-            else:
-                return ExtractResponse(
-                    contract={},
-                    scene="scanned",
-                    rag_examples=[],
-                )
+        text, scene = _parse_pdf(tmp_path)
+        if not text.strip():
+            return ExtractResponse(contract={}, scene=scene, rag_examples=[])
 
         # 3. 线性流水线：分类 → RAG few-shot 提取（LangChain LCEL）
         outcome = pipeline.run(text)
@@ -156,6 +164,41 @@ async def extract_contract(file: UploadFile = File(...)):
             scene=scene,
             rag_examples=result.reference_examples,
         )
+    finally:
+        os.unlink(tmp_path)
+
+
+@app.post("/api/extract_contract")
+async def extract_contract_full(file: UploadFile = File(...)):
+    """Odoo 集成专用：上传 PDF → 解析 + 多智能体提取 + 审查，返回完整结果。"""
+    start = time.perf_counter()
+    suffix = os.path.splitext(file.filename or "")[1] or ".pdf"
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    logger.info("收到 PDF 上传（Odoo 集成）：%s（%d 字节）", file.filename, len(content))
+    try:
+        text, scene = _parse_pdf(tmp_path)
+        if not text.strip():
+            return {
+                "scene": scene, "text": "", "contract": {},
+                "verdict": "", "risks": [], "reference_examples": [], "trace": [],
+            }
+        result = agents.run_agents(text)
+        logger.info(
+            "Odoo 集成提取完成：type=%s 耗时=%.1fms",
+            result.get("contract_type"), (time.perf_counter() - start) * 1000,
+        )
+        return {
+            "scene": scene,
+            "text": text,
+            "contract": result.get("contract") or {},
+            "verdict": result.get("verdict") or "",
+            "risks": result.get("risks") or [],
+            "reference_examples": result.get("reference_examples") or [],
+            "trace": result.get("trace") or [],
+        }
     finally:
         os.unlink(tmp_path)
 
@@ -231,6 +274,16 @@ def generate_finance(contract_id: int):
 @app.get("/api/contracts/{contract_id}/finance")
 def get_finance(contract_id: int):
     return {"contract_id": contract_id, "plans": store.list_plans(contract_id)}
+
+
+@app.post("/api/finance_plan")
+def finance_plan(req: FinancePlanRequest):
+    """Odoo 集成专用：无状态生成收付款计划（AI 提取分期节点，不落库）。"""
+    installments = finance.extract_installments(req.payment_method, req.amount)
+    return {
+        "direction": finance.direction_for(req.contract_type),
+        "plans": installments,
+    }
 
 
 @app.get("/api/templates")

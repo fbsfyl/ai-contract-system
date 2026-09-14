@@ -103,6 +103,19 @@ contract project/
 │   ├── generate_sample_pdf.py   # 生成文字版测试 PDF
 │   ├── generate_scanned_pdf.py  # 生成扫描版测试 PDF
 │   └── test_table.py            # 验证复杂表格管线
+├── odoo_addons/
+│   └── contract/                # Odoo 自定义模块（考核 C：框架选型 5 分档）
+│       ├── __manifest__.py
+│       ├── models/
+│       │   ├── contract.py      # 合同 model（13 字段 + 状态机 + AI 客户端）
+│       │   └── counterparty.py  # 相对方/签约主体 model
+│       ├── views/
+│       │   ├── contract_views.xml
+│       │   ├── counterparty_views.xml
+│       │   └── menus.xml
+│       └── security/
+│           ├── contract_security.xml  # 权限组
+│           └── ir.model.access.csv
 ├── Dockerfile
 ├── docker-compose.yml
 ├── start.ps1                    # 一键启动脚本
@@ -180,6 +193,7 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 | B4 商用加固 | 登录鉴权 | 页面顶部登录栏；或直接调 `POST /api/draft` 等 | 未登录访问写操作接口返回 401，登录后携带 Bearer token 才可起草/改状态 |
 | B5 业财一体化 | 收付款计划 | 台账点「业财」按钮 | 按合同类型判定应收/应付，生成分期计划 |
 | C 技术解耦 | LLM/Embedding 可替换 | 改 `.env` 的 `LLM_BASE_URL` / `EMBEDDING_PROVIDER` | 无需改业务代码即可切换底座 |
+| C 框架选型 | Odoo 自定义模块（高级解） | 安装 `odoo_addons/contract` 模块 | 自建 model（合同/相对方）+ view + 权限组，AI 服务解耦（见下方「Odoo 自定义模块」） |
 | D2 RAG 当监督学习 | few-shot 提升准确率 | 运行 `scripts\evaluate.py` | 有 few-shot 准确率 > 无 few-shot |
 | D1 检索可视化 | 整份范例 + 条款切块检索 | 首页「检索可视化」卡片或 `GET /api/search?q=...` | 返回相似度排序的范例与条款块 |
 | D4 改进闭环 | RAGAS 4 指标 + 前后对比 | 运行 `scripts\ragas_eval.py` | 输出 4 指标，并对比「整份范例」vs「条款切块」两轮聚合分，写 `data/ragas_report.txt` |
@@ -190,6 +204,35 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 | E 对比数据 | 文字版 vs 扫描版准确率 | 运行 `scripts\eval_ocr.py` | 同一金标准上两方案逐字段准确率（当前均 100%） |
 | A 提示词工程 | 分层提示词 + 枚举 + 重试 | 代码见 `app/prompts.py`、`app/extractor.py` | 分类/提取分层，`Literal` 枚举约束，解析失败自动重试 |
 | G 工程化交付 | Docker 化 + 一键启动 + 测试用例 | `docker compose up`、`.\start.ps1`、`run_tests.py` | 一键起服务；一键跑全部准确率/评估脚本 |
+
+### Odoo 自定义模块（考核 C：框架选型 5 分档）
+
+`odoo_addons/contract` 是一个纯 Odoo addon，用「模型驱动」承载合同业务，对应评分标准「用 Odoo 自定义模块 + 自建 model + view + 权限组，只写 addons 不改源码」的高级解。
+
+**包含内容**
+
+- `contract.contract`：合同 model，字段与 FastAPI 的 13 字段契约一致，含状态机（草拟→审批→用印→归档→作废）
+- `contract.counterparty`：相对方 / 签约主体 model（合同通过 `counterparty_id` 关联）
+- 自定义 view（form / tree）+ 菜单 + 权限组（合同管理员）
+- `action_ai_extract`：调用外部 AI 服务的按钮
+
+**三个解耦（附加理念分）**
+
+1. 业务解耦：AI 提取/审查不在 Odoo 内实现，而是通过 HTTP 调外部 FastAPI 服务 `POST /api/agents`（多智能体接力），Odoo 只存业务与结果
+2. 技术解耦：LLM/Embedding 仍由 FastAPI 侧 `.env` 控制，可替换
+3. 编排解耦：Agent 编排层（LangChain/LangGraph）独立在 `app/` 里，Odoo 无感知
+
+**安装运行（Odoo 16）**
+
+```powershell
+# 1. 把 addon 目录加入 Odoo 的 addons_path（或软链进 addons 目录）
+# 2. Odoo「应用」里刷新本地模块 → 安装「合同管理（AI 集成）」
+# 3. 先启动 AI 服务：.\start.ps1  （默认 http://127.0.0.1:8000）
+# 4. （可选）配置 AI 服务地址的系统参数：
+#    设置 → 技术 → 系统参数 → 新增 contract.ai_service_url = http://127.0.0.1:8000
+```
+
+在合同表单粘贴「合同原文」→ 点「AI 提取」按钮，即调用外部 AI 服务回填 13 字段并带出审查结论与风险点。
 
 ### 已知评估数据
 
