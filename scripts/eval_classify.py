@@ -1,6 +1,6 @@
 """分类准确率评估（考核 B2：10 份样本盲测 ≥90%）。
 
-用 5 条范例 + 5 条测试金标准共 10 份样本，对比：
+用 5 条范例 + 10 条测试金标准共 15 份样本，对比：
 - 规则通道（本地关键词，快）
 - LLM 通道（语义分类，主通道）
 
@@ -34,7 +34,7 @@ def main() -> None:
     rule_correct = 0
     llm_correct = 0
     print("=" * 70)
-    print(f"分类准确率评估（{len(samples)} 份样本：5 范例 + 5 测试金标准）")
+    print(f"分类准确率评估（{len(samples)} 份样本）")
     print("=" * 70)
     print(f"{'样本':<24}{'金标准':<8}{'规则':<8}{'LLM':<8}LLM置信度")
     for sid, gold, text in samples:

@@ -86,7 +86,7 @@ contract project/
 │   └── static/index.html
 ├── data/
 │   ├── examples/contracts.json  # 5 条标准范例（RAG 检索库）
-│   ├── tests.json               # 5 条测试金标准（采购/销售/服务/租赁/其他）
+│   ├── tests.json               # 10 条测试金标准（采购/销售/服务/租赁/其他 各 2 条）
 │   ├── templates.json           # 5 类合同模板 + 条款库（B3 起草）
 │   ├── sample_contract.pdf      # 政府采购示范文本（空白模板）
 │   ├── filled_contract.pdf      # 已填好的服务器采购合同
@@ -108,7 +108,8 @@ contract project/
 │       ├── __manifest__.py
 │       ├── models/
 │       │   ├── contract.py      # 合同 model（13 字段 + 状态机 + AI 客户端）
-│       │   └── counterparty.py  # 相对方/签约主体 model
+│       │   ├── counterparty.py  # 相对方/签约主体 model
+│       │   └── payment_plan.py  # 收付款计划 model（业财一体化）
 │       ├── views/
 │       │   ├── contract_views.xml
 │       │   ├── counterparty_views.xml
@@ -211,14 +212,19 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 
 **包含内容**
 
-- `contract.contract`：合同 model，字段与 FastAPI 的 13 字段契约一致，含状态机（草拟→审批→用印→归档→作废）
+- `contract.contract`：合同 model，字段与 FastAPI 的 13 字段契约一致，含状态机（草拟→审批→用印→归档→作废）+ 自动编号（`HT-类型前缀-年份-序号`）
 - `contract.counterparty`：相对方 / 签约主体 model（合同通过 `counterparty_id` 关联）
+- `contract.payment_plan`：收付款计划 model（业财一体化，合同 1:N 计划）
 - 自定义 view（form / tree）+ 菜单 + 权限组（合同管理员）
-- `action_ai_extract`：调用外部 AI 服务的按钮
+- AI 集成按钮（全部通过 HTTP 调外部 FastAPI，Odoo 不内嵌 AI）：
+  - `从 PDF 导入`：上传 PDF → 调 `/api/extract_contract` → 解析 + 多智能体提取 + 审查 → 回填 13 字段 + 审查结论/风险点
+  - `AI 提取`：对已填「合同原文」调 `/api/agents` 多智能体接力
+  - `生成付款计划`：调 `/api/finance_plan` → LLM 提取分期节点 → 生成收付款计划
+  - `检索相似范例`：调 `/api/search` → RAG 检索相似合同 + 相似度回填
 
 **三个解耦（附加理念分）**
 
-1. 业务解耦：AI 提取/审查不在 Odoo 内实现，而是通过 HTTP 调外部 FastAPI 服务 `POST /api/agents`（多智能体接力），Odoo 只存业务与结果
+1. 业务解耦：AI 提取/审查/业财/RAG 不在 Odoo 内实现，全部通过 HTTP 调外部 FastAPI 服务，Odoo 只存业务与结果
 2. 技术解耦：LLM/Embedding 仍由 FastAPI 侧 `.env` 控制，可替换
 3. 编排解耦：Agent 编排层（LangChain/LangGraph）独立在 `app/` 里，Odoo 无感知
 
@@ -232,23 +238,23 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 #    设置 → 技术 → 系统参数 → 新增 contract.ai_service_url = http://127.0.0.1:8000
 ```
 
-在合同表单粘贴「合同原文」→ 点「AI 提取」按钮，即调用外部 AI 服务回填 13 字段并带出审查结论与风险点。
+在合同表单上传「合同 PDF」→ 点「从 PDF 导入」按钮，即调用外部 AI 服务解析并回填 13 字段，同时带出审查结论与风险点；点「生成付款计划」生成业财分期节点；点「检索相似范例」做 RAG 检索。
 
 ### 已知评估数据
 
-`scripts/evaluate.py` 输出（5 条金标准，覆盖 5 类，13×5=65 字段）：
+`scripts/evaluate.py` 输出（10 条金标准，覆盖 5 类，13×10=130 字段）：
 
 ```
-无 few-shot：96.9%  (63/65)
-有 few-shot：100.0% (65/65)
-提升：+3.1%  ↑ RAG few-shot 有效
+无 few-shot：98.5%  (128/130)
+有 few-shot：100.0% (130/130)
+提升：+1.5%  ↑ RAG few-shot 有效
 ```
 
-`scripts/eval_classify.py` 输出（10 份样本：5 范例 + 5 测试金标准）：
+`scripts/eval_classify.py` 输出（15 份样本：5 范例 + 10 测试金标准）：
 
 ```
-规则通道：10/10 = 100.0%
-LLM 通道：10/10 = 100.0%
+规则通道：15/15 = 100.0%
+LLM 通道：15/15 = 100.0%
 （B2 要求 ≥90%，达标）
 ```
 
@@ -277,12 +283,14 @@ LLM 通道：10/10 = 100.0%
 |---|---|---|
 | GET | `/api/health` | 健康检查 + 向量库范例数 |
 | POST | `/api/extract` | 上传 PDF（multipart），返回提取结果 + 场景 + RAG 范例 |
+| POST | `/api/extract_contract` | 上传 PDF → 解析 + 多智能体提取 + 审查，供 Odoo 集成调用 |
 | GET | `/api/contracts` | 查询所有已入库合同 |
 | GET | `/api/search?q=...` | 检索可视化（整份范例 + 条款切块，含相似度） |
 | POST | `/api/agents` | 多智能体接力（body `{"text": "..."}`） |
 | POST | `/api/review` | LangGraph 审查（body `{"contract_id": 1}`） |
 | POST | `/api/contracts/{id}/finance` | 生成收付款计划 |
 | GET | `/api/contracts/{id}/finance` | 查询收付款计划 |
+| POST | `/api/finance_plan` | 无状态业财端点：收合同要素 → LLM 提取分期节点（供 Odoo 集成调用） |
 | POST | `/api/login` | 登录（body `{"username","password"}`，返回 Bearer token） |
 | GET | `/api/templates` | 合同模板 + 条款库列表 |
 | GET | `/api/contracts/next_no?contract_type=` | 按类型取下一可用合同编号 |
@@ -302,7 +310,7 @@ LLM 通道：10/10 = 100.0%
 | `data/table_contract.pdf` | 含 4×4 付款表格的合同，测表格结构化提取 |
 | `data/sample_contract.pdf` | 政府采购示范文本（空白模板），字段多为「未注明」属正常 |
 | `data/examples/contracts.json` | 5 条标准范例（RAG 检索库，few-shot 参照） |
-| `data/tests.json` | 5 条测试金标准（采购/销售/服务/租赁/其他），用于提取+分类评估 |
+| `data/tests.json` | 10 条测试金标准（采购/销售/服务/租赁/其他 各 2 条），用于提取+分类评估 |
 
 可重新生成测试 PDF：
 
