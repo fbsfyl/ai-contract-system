@@ -66,6 +66,7 @@ contract project/
 ├── app/
 │   ├── main.py          # FastAPI 入口 + 全部 API
 │   ├── config.py        # 配置（.env 驱动）
+│   ├── logging_config.py# 统一日志（控制台 + 滚动文件 logs/app.log）
 │   ├── schemas.py       # 字段契约（Pydantic + 类型枚举）
 │   ├── prompts.py       # 提示词工程（分类/提取分层）
 │   ├── llm.py           # LLM 客户端（JSON 输出 + 解析重试）
@@ -160,6 +161,10 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 ```
 
 > 注意：若在受限沙箱/只读环境运行，Python 写字节码缓存到全局目录可能被拦截，此时加 `-B` 参数（如 `.venv\Scripts\python.exe -B scripts\seed_examples.py`）。普通本机环境无需 `-B`。
+
+### 日志
+
+应用日志同时输出到控制台与 `logs/app.log`（滚动文件，单文件 5MB × 最多 5 个历史）。每次 API 请求（方法/路径/状态码/耗时）、PDF 场景分流、分类与提取流水线、起草、状态流转、业财计划等内部流程都会被记录，便于排障与验收演示。第三方库（chromadb / httpx / uvicorn 等）日志已压到 WARNING 降噪。
 
 ## 五、功能验收清单
 

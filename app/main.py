@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 import tempfile
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
@@ -12,9 +13,9 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import agents, cms, config, finance, ocr, pdf_loader, pipeline, review_agent, store, table, vector_store
+from app import agents, cms, config, finance, logging_config, ocr, pdf_loader, pipeline, review_agent, store, table, vector_store
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging_config.setup_logging()
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -28,6 +29,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AI 合同系统（最小集）", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """请求级日志：记录每一次 API 调用的方法、路径、状态码与耗时。"""
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    logger.info("HTTP %s %s -> %d (%.1fms)", request.method, request.url.path, response.status_code, duration_ms)
+    return response
 
 
 class ExtractResponse(BaseModel):
@@ -91,21 +102,27 @@ def login(req: LoginRequest):
     if req.username == config.ADMIN_USER and req.password == config.ADMIN_PASSWORD:
         token = secrets.token_hex(16)
         _ACTIVE_TOKENS.add(token)
+        logger.info("登录成功：%s", req.username)
         return {"token": token}
+    logger.warning("登录失败：%s", req.username)
     raise HTTPException(status_code=401, detail="账号或密码错误")
 
 
 @app.post("/api/extract", response_model=ExtractResponse)
 async def extract_contract(file: UploadFile = File(...)):
+    start = time.perf_counter()
     # 1. 落盘临时文件
     suffix = os.path.splitext(file.filename or "")[1] or ".pdf"
+    content = await file.read()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
+        tmp.write(content)
         tmp_path = tmp.name
+    logger.info("收到上传：%s（%d 字节）", file.filename, len(content))
 
     try:
         # 2. PDF 场景分流（文字版直接抽文本，扫描件走 OCR + 表格管线）
         text, scene = pdf_loader.extract_text_from_pdf(tmp_path)
+        logger.info("PDF 场景分流：%s（%d 字符）", scene, len(text))
         if scene == "scanned":
             text = ocr.ocr_pdf(tmp_path)
             # 复杂表格/骑缝章/歪斜：结构化提取，作为全文的结构化补充
@@ -128,6 +145,7 @@ async def extract_contract(file: UploadFile = File(...)):
 
         # 4. 入库
         contract_id = store.insert(result)
+        logger.info("提取完成：type=%s 合同ID=%d 耗时=%.1fms", result.contract_type, contract_id, (time.perf_counter() - start) * 1000)
 
         return ExtractResponse(
             contract={
@@ -230,8 +248,11 @@ def next_no(contract_type: str = "其他"):
 def draft_contract(req: DraftRequest):
     """要素拼装起草（考核 B3）：模板拼装 + 自动编号 + 入库。"""
     try:
-        return cms.draft(**req.model_dump())
+        result = cms.draft(**req.model_dump())
+        logger.info("起草完成：编号=%s 名称=%s", result["contract_no"], req.contract_name)
+        return result
     except ValueError as e:
+        logger.warning("起草失败：%s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -241,9 +262,12 @@ def change_status(contract_id: int, req: StatusRequest):
     try:
         updated = store.update_status(contract_id, req.status)
     except ValueError as e:
+        logger.warning("状态流转被拦截：合同 %d -> %s（%s）", contract_id, req.status, e)
         raise HTTPException(status_code=400, detail=str(e))
     if updated is None:
+        logger.warning("状态流转失败：合同 %d 不存在", contract_id)
         raise HTTPException(status_code=404, detail="合同不存在")
+    logger.info("状态流转：合同 %d -> %s", contract_id, req.status)
     return updated
 
 

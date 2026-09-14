@@ -8,20 +8,29 @@
 
 两者各司其职：线性用 LangChain，回路用 LangGraph。
 """
+import logging
+import time
+
 from langchain_core.runnables import RunnableLambda
 
 from app import classifier, extractor
 
+logger = logging.getLogger(__name__)
+
 
 def _classify(text: str) -> dict:
     """线性步骤①：合同分类（LLM + 规则双通道）。"""
+    start = time.perf_counter()
     ctype, confidence = classifier.classify(text)
+    logger.info("[流水线] 分类：%s（置信度 %.2f，%.1fms）", ctype, confidence, (time.perf_counter() - start) * 1000)
     return {"text": text, "contract_type": ctype, "confidence": confidence}
 
 
 def _extract(state: dict) -> dict:
     """线性步骤②：结构化提取（RAG few-shot + 校验重试）。"""
+    start = time.perf_counter()
     contract = extractor.extract(state["text"], use_rag=True)
+    logger.info("[流水线] 提取：type=%s 金额=%s（%.1fms）", contract.contract_type, contract.amount, (time.perf_counter() - start) * 1000)
     return {
         "contract": contract,
         "contract_type": state["contract_type"],

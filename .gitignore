@@ -16,6 +16,9 @@ __pycache__/
 contracts.db
 chroma_db/
 
+# 运行日志（滚动文件，不提交）
+logs/
+
 # 系统文件
 .DS_Store
 Thumbs.db
