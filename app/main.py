@@ -45,6 +45,7 @@ class ExtractResponse(BaseModel):
     contract: dict
     scene: str
     rag_examples: list[str]
+    rag_details: list[dict] = []
 
 
 class ReviewRequest(BaseModel):
@@ -155,6 +156,10 @@ async def extract_contract(file: UploadFile = File(...)):
         contract_id = store.insert(result)
         logger.info("提取完成：type=%s 合同ID=%d 耗时=%.1fms", result.contract_type, contract_id, (time.perf_counter() - start) * 1000)
 
+        rag_details = [
+            {"id": e["id"], "contract_type": e["contract_type"], "similarity": e["similarity"]}
+            for e in vector_store.search_similar(text)
+        ]
         return ExtractResponse(
             contract={
                 **result.model_dump(),
@@ -163,6 +168,7 @@ async def extract_contract(file: UploadFile = File(...)):
             },
             scene=scene,
             rag_examples=result.reference_examples,
+            rag_details=rag_details,
         )
     finally:
         os.unlink(tmp_path)

@@ -1,4 +1,4 @@
-﻿# 一键启动 AI 合同系统全部服务（FastAPI + Odoo 16）
+﻿﻿﻿﻿# 一键启动 AI 合同系统全部服务（FastAPI + Odoo 16）
 # 用法：在项目根目录执行  .\start_all.ps1
 # 说明：Odoo 与 FastAPI 均后台运行，关窗口不影响；日志见 logs\ 目录
 $ErrorActionPreference = "Stop"
@@ -48,6 +48,6 @@ Write-Host "  Odoo    : http://localhost:8069  （admin / admin）" -ForegroundC
 Write-Host "  容器内 Odoo 访问 AI 服务地址：http://host.docker.internal:8000" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  查看实时日志（另开窗口）：" -ForegroundColor Cyan
-Write-Host "    Get-Content logs\app.log -Wait -Encoding UTF8          # 业务 + HTTP 请求日志（主日志）" -ForegroundColor Cyan
-Write-Host "    Get-Content logs\fastapi_error.log -Wait -Encoding UTF8  # uvicorn 进程 stderr（启动报错/崩溃时看）" -ForegroundColor Cyan
+Write-Host "    Get-Content logs\app.log -Wait          # 业务 + HTTP 请求日志（主日志，UTF-8 带 BOM）" -ForegroundColor Cyan
+Write-Host "    Get-Content logs\fastapi_error.log -Wait  # uvicorn 进程 stderr（启动报错/崩溃时看）" -ForegroundColor Cyan
 Write-Host "  一键关闭全部服务：.\stop_all.ps1" -ForegroundColor Cyan

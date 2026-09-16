@@ -22,3 +22,6 @@ logs/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 考核文档（仅本地参考，不提交 GitHub）
+合同系统认证考核评分标准.md

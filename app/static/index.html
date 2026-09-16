@@ -49,16 +49,6 @@
     </div>
 
     <div class="card">
-      <h2>检索可视化（RAG 向量库 · 调试工具）</h2>
-      <p class="hint">调试用途：手动查看向量库命中的相似范例与条款、相似度。正常上传合同时无需操作，提取环节会自动完成检索。</p>
-      <div class="upload-row">
-        <input type="text" id="searchQ" placeholder="输入关键词，如：采购 服务器" style="flex:1; padding:8px;" />
-        <button onclick="search()">检索</button>
-      </div>
-      <div id="searchResult" style="margin-top:12px;"></div>
-    </div>
-
-    <div class="card">
       <h2>多智能体接力演示</h2>
       <p class="hint">分类 Agent → 提取 Agent → 校验 Agent → 审查 Agent，校验失败自动自我修正重来。本卡片仅演示多智能体编排轨迹，结果不入库。</p>
       <textarea id="agentsText" rows="6" style="width:100%; padding:8px; font-size:13px;">服务器采购合同
@@ -370,7 +360,10 @@
       if (c.type_confidence !== undefined) {
         html += `<tr><th>分类置信度</th><td>${Math.round(c.type_confidence * 100)}%</td></tr>`;
       }
-      html += `<tr><th>RAG 参照范例</th><td>${(data.rag_examples || []).map(escapeHtml).join("、") || "无"}</td></tr>`;
+      const ragRows = (data.rag_details || []).map(d =>
+        `${escapeHtml(d.contract_type)} · ${escapeHtml(d.id)}（相似度 ${Number(d.similarity).toFixed(2)}）`
+      ).join("；") || "无";
+      html += `<tr><th>RAG 参照范例</th><td>${ragRows}</td></tr>`;
       html += "</table>";
       const cid = c.id;
       html += '<div style="margin-top:12px;">' +
@@ -398,35 +391,6 @@
         div.innerHTML = html;
       } catch (e) {
         document.getElementById("contracts").innerHTML = '<p class="error">加载失败：' + e.message + "</p>";
-      }
-    }
-
-    async function search() {
-      const q = document.getElementById("searchQ").value.trim();
-      const div = document.getElementById("searchResult");
-      if (!q) { div.innerHTML = '<p class="muted">请输入关键词。</p>'; return; }
-      div.innerHTML = '<p class="muted">检索中…</p>';
-      try {
-        const resp = await fetch("/api/search?q=" + encodeURIComponent(q));
-        const r = await resp.json();
-        let html = '';
-        if (r.examples && r.examples.length) {
-          html += '<h3>整份范例命中</h3><table><tr><th>相似度</th><th>类型</th><th>范例</th></tr>';
-          for (const e of r.examples) {
-            html += `<tr><td>${e.similarity}</td><td>${escapeHtml(e.contract_type)}</td><td>${escapeHtml((e.text || '').slice(0, 60))}…</td></tr>`;
-          }
-          html += '</table>';
-        }
-        if (r.chunks && r.chunks.length) {
-          html += '<h3>条款切块命中</h3><table><tr><th>相似度</th><th>类型</th><th>条款</th></tr>';
-          for (const c of r.chunks) {
-            html += `<tr><td>${c.similarity}</td><td>${escapeHtml(c.contract_type)}</td><td>${escapeHtml(c.text)}</td></tr>`;
-          }
-          html += '</table>';
-        }
-        div.innerHTML = html || '<p class="muted">无检索结果（请先运行 seed_examples.py 写入范例）。</p>';
-      } catch (e) {
-        div.innerHTML = '<p class="error">检索失败：' + e.message + '</p>';
       }
     }
 

@@ -215,7 +215,7 @@ docker compose up --build   # 需先准备 .env（DEEPSEEK_API_KEY）
 | C 技术解耦 | LLM/Embedding 可替换 | 改 `.env` 的 `LLM_BASE_URL` / `EMBEDDING_PROVIDER` | 无需改业务代码即可切换底座 |
 | C 框架选型 | Odoo 自定义模块（高级解） | 安装 `odoo_addons/contract` 模块 | 自建 model（合同/相对方）+ view + 权限组，AI 服务解耦（见下方「Odoo 自定义模块」） |
 | D2 RAG 当监督学习 | few-shot 提升准确率 | 运行 `scripts\evaluate.py` | 有 few-shot 准确率 > 无 few-shot |
-| D1 检索可视化 | 整份范例 + 条款切块检索 | 首页「检索可视化」卡片或 `GET /api/search?q=...` | 返回相似度排序的范例与条款块 |
+| D1 检索可视化 | 整份范例 + 条款切块检索 | 提取结果「RAG 参照范例」列（含相似度）或 `GET /api/search?q=...` | 返回相似度排序的范例与条款块 |
 | D4 改进闭环 | RAGAS 4 指标 + 前后对比 | 运行 `scripts\ragas_eval.py` | 输出 4 指标，并对比「整份范例」vs「条款切块」两轮聚合分，写 `data/ragas_report.txt` |
 | D3 LangChain 线性 | 分类→提取串行管道 | 上传 PDF 时 `app/pipeline.py` 自动走 LCEL | `RunnableLambda | RunnableLambda` 无状态一遍跑完 |
 | D3 LangGraph 审查 | 合同审查 + 回路 | 台账点「审查」按钮 | 返回结论 + 回路轨迹（pass/supplement/人工介入） |
